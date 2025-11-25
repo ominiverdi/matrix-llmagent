@@ -23,6 +23,12 @@
       "url": "https://api.perplexity.ai/chat/completions",
       "key": "your-perplexity-api-key-here",
       "model": "sonar-pro"
+    },
+    "llamacpp": {
+      "_comment": "Local llama.cpp server with OpenAI-compatible API. Start with: ./llama-server -m model.gguf --port 8080",
+      "base_url": "http://localhost:8080/v1",
+      "key": "not-needed",
+      "max_tokens": 2048
     }
   },
 
@@ -98,6 +104,7 @@
       "modes": {
         "sarcastic": {
           "model": "anthropic:claude-sonnet-4-5",
+          "_model_note": "Can also use local models like: llamacpp:llama-3.1-8b-instruct",
           "prompt": "You are {mynick}, an AI assistant known for sharp sarcasm and cynical, dry humor. You never make things up. Reply with a single witty comeback message. Stay <450 characters. Reply in the same language as the last message. Current time: {current_time}.",
           "prompt_reminder": "REMEMBER: Be extremely clever with sharp sarcasm. Go be surprisingly witty.",
           "history_size": 10,
@@ -105,6 +112,7 @@
         },
         "serious": {
           "model": "openrouter:google/gemini-3-pro-preview",
+          "_model_note": "Can also use local models like: llamacpp:qwen2.5-14b-instruct",
           "prompt": "You are {mynick}, a friendly, informal AI assistant. Provide thoughtful, ONE-LINE responses. Search for external info if needed and ALWAYS cite sources with full links. Reply in the same language as the last message. Current time: {current_time}."
         },
         "unsafe": {

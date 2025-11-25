@@ -4,23 +4,89 @@ A modern Python-based agentic LLM chatbot service for Matrix with persistent mem
 
 ## Features
 
-- **AI Integrations**: Anthropic Claude, OpenAI, DeepSeek, any OpenRouter model, Perplexity AI
-- **Agentic Capability**: Ability to visit websites, view images, perform deep research, execute Python code, publish artifacts
-- **Command System**: Extensible command-based interaction with prefixes for various modes
-- **Proactive Interjecting**: Channel-based whitelist system for automatic participation in relevant conversations
-- **Restartable and Persistent Memory**: All state is persisted; AI agent maintains a continuous chronicle of events and experiences to refer to
-- **Async Architecture**: Non-blocking message processing with concurrent handling
-- **Modern Python**: Built with uv, type safety, and comprehensive testing
-- **Rate Limiting**: Configurable rate limiting and user management
+- **🟣 Matrix Protocol**: Native Matrix client with full room support
+- **🧠 Local LLMs**: llama.cpp support for local model inference
+- **🤖 AI Integrations**: Anthropic Claude, OpenAI, DeepSeek, any OpenRouter model, Perplexity AI
+- **🛠️ Agentic Capability**: Visit websites, view images, deep research, execute Python code, publish artifacts
+- **📚 Persistent Memory**: Chronicle system maintains continuous memory across conversations
+- **🎭 Multiple Modes**: Sarcastic, serious, unsafe, agent, and perplexity modes
+- **🎯 Proactive Interjecting**: Automatically joins relevant conversations
+- **⚡ Async Architecture**: Non-blocking message processing
+- **🔒 Rate Limiting**: Configurable rate limiting per user
 
 ## Installation
 
 1. Install dependencies: `uv sync --dev`
-2. Copy `config.json.example` to `config.json` and configure your API keys
-3. Set up Matrix credentials in config.json
-4. Run the service: `uv run matrix-llmagent`
+2. Copy `config.json.example` to `config.json`
+3. Configure Matrix credentials and API keys
+4. Run: `uv run matrix-llmagent`
 
-Note: This is currently in migration from IRC to Matrix. See PLAN.md for details.
+## Matrix Setup
+
+Get your Matrix credentials:
+1. Create a Matrix account (or use existing)
+2. Get access token from Element: Settings → Help & About → Access Token
+3. Add to `config.json`:
+
+```json
+{
+  "matrix": {
+    "homeserver": "https://matrix.org",
+    "user_id": "@yourbot:matrix.org",
+    "access_token": "your_token_here",
+    "device_id": "MATRIX_LLMAGENT"
+  }
+}
+```
+
+## Local LLM Setup (llama.cpp)
+
+Run local models with llama.cpp:
+
+1. Install llama.cpp server:
+```bash
+# Clone and build llama.cpp
+git clone https://github.com/ggerganov/llama.cpp
+cd llama.cpp
+cmake -B build
+cmake --build build --config Release
+```
+
+2. Start llama.cpp server:
+```bash
+# Example with Llama 3.1 8B
+./build/bin/llama-server -m models/llama-3.1-8b-instruct.gguf --port 8080
+```
+
+3. Configure in `config.json`:
+```json
+{
+  "providers": {
+    "llamacpp": {
+      "base_url": "http://localhost:8080/v1",
+      "key": "not-needed",
+      "max_tokens": 2048
+    }
+  },
+  "matrix": {
+    "command": {
+      "modes": {
+        "serious": {
+          "model": "llamacpp:llama-3.1-8b-instruct"
+        }
+      }
+    }
+  }
+}
+```
+
+Recommended models for llama.cpp:
+- **Llama 3.1/3.2** (8B, 70B) - Great all-around performance
+- **Qwen 2.5** (7B, 14B, 32B) - Excellent reasoning
+- **Mistral** (7B) - Fast and efficient
+- **DeepSeek** - Good for coding tasks
+
+Download models from [Hugging Face](https://huggingface.co/models?library=gguf&sort=trending)
 
 ## Configuration
 

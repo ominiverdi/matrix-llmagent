@@ -134,6 +134,10 @@ class ModelRouter:
             from .openai import OpenRouterClient
 
             client = OpenRouterClient(self.config)
+        elif provider == "llamacpp":
+            from .llamacpp import LlamaCppClient
+
+            client = LlamaCppClient(self.config)
         else:
             raise ValueError(f"Unknown provider: {provider}")
         self._clients[provider] = client
