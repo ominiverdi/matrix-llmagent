@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from irssi_llmagent.providers import ModelRouter
+from matrix_llmagent.providers import ModelRouter
 
 
 class TestRefusalFallback:

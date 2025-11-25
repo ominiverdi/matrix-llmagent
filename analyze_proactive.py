@@ -10,7 +10,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from irssi_llmagent.main import IRSSILLMAgent
+from matrix_llmagent.main import IRSSILLMAgent
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)

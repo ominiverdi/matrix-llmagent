@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from irssi_llmagent.main import IRSSILLMAgent
-from irssi_llmagent.rooms import ProactiveDebouncer
+from matrix_llmagent.main import IRSSILLMAgent
+from matrix_llmagent.rooms import ProactiveDebouncer
 
 
 class MockAPIClient:
@@ -99,7 +99,7 @@ class TestIRCMonitor:
             return resp, MockAPIClient("Test response"), None
 
         with patch(
-            "irssi_llmagent.agentic_actor.actor.ModelRouter.call_raw_with_model",
+            "matrix_llmagent.agentic_actor.actor.ModelRouter.call_raw_with_model",
             new=AsyncMock(side_effect=fake_call_raw_with_model),
         ):
             # proceed
@@ -138,7 +138,7 @@ class TestIRCMonitor:
             return resp, MockAPIClient("Test response"), None
 
         with patch(
-            "irssi_llmagent.agentic_actor.actor.ModelRouter.call_raw_with_model",
+            "matrix_llmagent.agentic_actor.actor.ModelRouter.call_raw_with_model",
             new=AsyncMock(side_effect=fake_call_raw_with_model),
         ):
             # Test private message without nick prefix (should be treated as command)
@@ -298,8 +298,8 @@ class TestIRCMonitor:
             await agent.history.add_message("test", "#test", "final interfering", "dave", "mybot")
 
         with (
-            patch("irssi_llmagent.rooms.irc.monitor.time", spec=True) as mock_time_module,
-            patch("irssi_llmagent.providers.ModelRouter.call_raw_with_model") as mock_router,
+            patch("matrix_llmagent.rooms.irc.monitor.time", spec=True) as mock_time_module,
+            patch("matrix_llmagent.providers.ModelRouter.call_raw_with_model") as mock_router,
         ):
             # Mock time and API calls to prevent delays
             mock_time_module.time = mock_time
@@ -512,7 +512,7 @@ class TestIRCMonitor:
         await agent.chronicle.append_paragraph(arc, "Previous discussion about Python")
         await agent.chronicle.append_paragraph(arc, "User asked about imports")
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value="Agent response")
             mock_agent_class.return_value = mock_agent
@@ -559,7 +559,7 @@ class TestIRCMonitor:
         await agent.history.initialize()
         await agent.chronicle.initialize()
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value="Agent response")
             mock_agent_class.return_value = mock_agent
@@ -654,7 +654,7 @@ class TestIRCMonitor:
 
             return resp, MockAPIClient("Sarcastic response"), None
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value="Sarcastic response")
             mock_agent_class.return_value = mock_agent
@@ -698,7 +698,7 @@ class TestIRCMonitor:
         # Set up the model_router mock
         agent.model_router.call_raw_with_model = AsyncMock(side_effect=fake_call_raw_with_model)
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value="Agent response")
             mock_agent_class.return_value = mock_agent
@@ -723,7 +723,7 @@ class TestIRCMonitor:
         await agent.chronicle.initialize()
 
         # Mock the AgenticLLMActor for unsafe mode
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value="Unsafe response")
             mock_agent_class.return_value = mock_agent
@@ -754,7 +754,7 @@ class TestIRCMonitor:
         await agent.chronicle.initialize()
 
         # Mock the AgenticLLMActor for unsafe mode
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value="Unsafe response")
             mock_agent_class.return_value = mock_agent
@@ -797,7 +797,7 @@ class TestIRCMonitor:
         await agent.history.initialize()
         await agent.chronicle.initialize()
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value="Response")
             mock_agent_class.return_value = mock_agent
@@ -822,7 +822,7 @@ class TestIRCMonitor:
         await agent.history.initialize()
         await agent.chronicle.initialize()
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent_instance = AsyncMock()
             mock_agent_instance.run_agent.side_effect = ValueError("Invalid model format")
             mock_agent_class.return_value = mock_agent_instance
@@ -863,7 +863,7 @@ class TestIRCMonitor:
         # Set up the model_router mock
         agent.model_router.call_raw_with_model = AsyncMock(side_effect=fake_call_raw_with_model)
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value="Unsafe agent response")
             mock_agent_class.return_value = mock_agent
@@ -920,7 +920,7 @@ class TestIRCMonitor:
         # Set up the model_router mock
         agent.model_router.call_raw_with_model = AsyncMock(side_effect=fake_call_raw_with_model)
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value="Test response")
             mock_agent_class.return_value = mock_agent
@@ -1033,14 +1033,14 @@ class TestIRCMonitor:
         # Create a very long response (over 800 chars)
         long_response = "This is a very long response. " * 50  # ~1500 chars
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value=long_response)
             mock_agent_class.return_value = mock_agent
 
             # Mock the ShareArtifactExecutor
             with patch(
-                "irssi_llmagent.agentic_actor.tools.ShareArtifactExecutor"
+                "matrix_llmagent.agentic_actor.tools.ShareArtifactExecutor"
             ) as mock_artifact_class:
                 mock_executor = AsyncMock()
                 mock_executor.execute = AsyncMock(
@@ -1084,7 +1084,7 @@ class TestIRCMonitor:
         # Create a short response (under 800 chars)
         short_response = "This is a short response."
 
-        with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
+        with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
             mock_agent = AsyncMock()
             mock_agent.run_agent = AsyncMock(return_value=short_response)
             mock_agent_class.return_value = mock_agent

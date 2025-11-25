@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from irssi_llmagent.history import ChatHistory
+from matrix_llmagent.history import ChatHistory
 
 
 class TestChatHistory:

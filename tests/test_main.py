@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from irssi_llmagent.main import IRSSILLMAgent, cli_message
+from matrix_llmagent.main import IRSSILLMAgent, cli_message
 
 
 class MockAPIClient:
@@ -50,7 +50,7 @@ class TestCLIMode:
         """Test CLI mode with sarcastic message."""
         with patch("builtins.print") as mock_print:
             # Mock the ChatHistory import in cli_message
-            with patch("irssi_llmagent.main.ChatHistory") as mock_history_class:
+            with patch("matrix_llmagent.main.ChatHistory") as mock_history_class:
                 mock_history = AsyncMock()
                 mock_history.add_message = AsyncMock()
                 mock_history.get_context.return_value = [
@@ -63,7 +63,7 @@ class TestCLIMode:
                 mock_history_class.return_value = mock_history
 
                 # Create a real agent
-                from irssi_llmagent.main import IRSSILLMAgent
+                from matrix_llmagent.main import IRSSILLMAgent
 
                 agent = IRSSILLMAgent(temp_config_file)
 
@@ -73,9 +73,9 @@ class TestCLIMode:
                     return resp, MockAPIClient("Sarcastic response"), None
 
                 # Patch the agent creation in cli_message and model router
-                with patch("irssi_llmagent.main.IRSSILLMAgent", return_value=agent):
+                with patch("matrix_llmagent.main.IRSSILLMAgent", return_value=agent):
                     with patch(
-                        "irssi_llmagent.agentic_actor.actor.ModelRouter.call_raw_with_model",
+                        "matrix_llmagent.agentic_actor.actor.ModelRouter.call_raw_with_model",
                         new=AsyncMock(side_effect=fake_call_raw_with_model),
                     ):
                         await cli_message("!S tell me a joke", temp_config_file)
@@ -93,9 +93,9 @@ class TestCLIMode:
         """Test CLI mode with Perplexity message."""
         with patch("builtins.print") as mock_print:
             with patch(
-                "irssi_llmagent.rooms.irc.monitor.PerplexityClient"
+                "matrix_llmagent.rooms.irc.monitor.PerplexityClient"
             ) as mock_perplexity_class:
-                with patch("irssi_llmagent.main.ChatHistory") as mock_history_class:
+                with patch("matrix_llmagent.main.ChatHistory") as mock_history_class:
                     # Mock history to return only the current message
                     mock_history = AsyncMock()
                     mock_history.add_message = AsyncMock()
@@ -113,12 +113,12 @@ class TestCLIMode:
                     mock_perplexity_class.return_value = mock_perplexity
 
                     # Create a real agent
-                    from irssi_llmagent.main import IRSSILLMAgent
+                    from matrix_llmagent.main import IRSSILLMAgent
 
                     agent = IRSSILLMAgent(temp_config_file)
 
                     # Patch the agent creation in cli_message
-                    with patch("irssi_llmagent.main.IRSSILLMAgent", return_value=agent):
+                    with patch("matrix_llmagent.main.IRSSILLMAgent", return_value=agent):
                         await cli_message("!p what is the weather?", temp_config_file)
 
                         # Verify Perplexity was called with the actual message in context
@@ -143,8 +143,8 @@ class TestCLIMode:
     async def test_cli_message_agent_message(self, temp_config_file):
         """Test CLI mode with agent message."""
         with patch("builtins.print") as mock_print:
-            with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
-                with patch("irssi_llmagent.main.ChatHistory") as mock_history_class:
+            with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
+                with patch("matrix_llmagent.main.ChatHistory") as mock_history_class:
                     # Mock history to return only the current message
                     mock_history = AsyncMock()
                     mock_history.add_message = AsyncMock()
@@ -162,12 +162,12 @@ class TestCLIMode:
                     mock_agent_class.return_value = mock_agent
 
                     # Create a real agent
-                    from irssi_llmagent.main import IRSSILLMAgent
+                    from matrix_llmagent.main import IRSSILLMAgent
 
                     agent = IRSSILLMAgent(temp_config_file)
 
                     # Patch the agent creation in cli_message
-                    with patch("irssi_llmagent.main.IRSSILLMAgent", return_value=agent):
+                    with patch("matrix_llmagent.main.IRSSILLMAgent", return_value=agent):
                         await cli_message("!s search for Python news", temp_config_file)
 
                         # Verify agent was called with context only
@@ -191,8 +191,8 @@ class TestCLIMode:
     async def test_cli_message_message_content_validation(self, temp_config_file):
         """Test that CLI mode passes actual message content, not placeholder text."""
         with patch("builtins.print"):
-            with patch("irssi_llmagent.main.AgenticLLMActor") as mock_agent_class:
-                with patch("irssi_llmagent.main.ChatHistory") as mock_history_class:
+            with patch("matrix_llmagent.main.AgenticLLMActor") as mock_agent_class:
+                with patch("matrix_llmagent.main.ChatHistory") as mock_history_class:
                     # Mock history to return only the current message
                     mock_history = AsyncMock()
                     mock_history.add_message = AsyncMock()
@@ -210,12 +210,12 @@ class TestCLIMode:
                     mock_agent_class.return_value = mock_agent
 
                     # Create a real agent
-                    from irssi_llmagent.main import IRSSILLMAgent
+                    from matrix_llmagent.main import IRSSILLMAgent
 
                     agent = IRSSILLMAgent(temp_config_file)
 
                     # Patch the agent creation in cli_message
-                    with patch("irssi_llmagent.main.IRSSILLMAgent", return_value=agent):
+                    with patch("matrix_llmagent.main.IRSSILLMAgent", return_value=agent):
                         await cli_message("!s specific test message", temp_config_file)
 
                         # Verify agent was called once for serious mode

@@ -1,6 +1,6 @@
-# irssi-llmagent
+# matrix-llmagent
 
-A modern Python-based agentic LLM chatbot service that connects to irssi via varlink protocol.
+A modern Python-based agentic LLM chatbot service for Matrix with persistent memory, tool use, and local model support.
 
 ## Features
 
@@ -15,12 +15,12 @@ A modern Python-based agentic LLM chatbot service that connects to irssi via var
 
 ## Installation
 
-1. Ensure `irssi-varlink` is loaded in your irssi
-2. Install dependencies: `uv sync --dev`
-3. Copy `config.json.example` to `config.json` and configure your API keys
-4. Run the service: `uv run irssi-llmagent`
+1. Install dependencies: `uv sync --dev`
+2. Copy `config.json.example` to `config.json` and configure your API keys
+3. Set up Matrix credentials in config.json
+4. Run the service: `uv run matrix-llmagent`
 
-Alternatively, see `docs/docker.md` for running this + irssi in a Docker compose setup.
+Note: This is currently in migration from IRC to Matrix. See PLAN.md for details.
 
 ## Configuration
 
@@ -28,25 +28,25 @@ Edit `config.json` based on `config.json.example` to set:
 - API keys
 - Paths for tools
 - Custom prompts for various modes
-- IRC integration settings
+- Matrix connection settings (homeserver, credentials)
 
 ## Commands
 
-- `mynick: message` - Automatic mode
-- `mynick: !h` - Show help and info about other modes
+- `@botname: message` - Automatic mode
+- `@botname: !h` - Show help and info about other modes
 
 ## CLI Testing Mode
 
 You can test the bot's message handling including command parsing from the command line:
 
 ```bash
-uv run irssi-llmagent --message "!h"
-uv run irssi-llmagent --message "tell me a joke"
-uv run irssi-llmagent --message "!d tell me a joke"
-uv run irssi-llmagent --message "!a summarize https://python.org" --config /path/to/config.json
+uv run matrix-llmagent --message "!h"
+uv run matrix-llmagent --message "tell me a joke"
+uv run matrix-llmagent --message "!d tell me a joke"
+uv run matrix-llmagent --message "!a summarize https://python.org" --config /path/to/config.json
 ```
 
-This simulates full IRC message handling including command parsing and automatic mode classification, useful for testing your configuration and API keys without setting up the full IRC bot.
+This simulates message handling including command parsing and automatic mode classification, useful for testing your configuration and API keys.
 
 ### Chronicler
 
@@ -54,10 +54,10 @@ The Chronicler maintains persistent memory across conversations using a Chronicl
 
 ```bash
 # Record information
-uv run irssi-llmagent --chronicler "Record: Completed API migration" --arc "project-x"
+uv run matrix-llmagent --chronicler "Record: Completed API migration" --arc "project-x"
 
 # View current chapter
-uv run irssi-llmagent --chronicler "Show me the current chapter" --arc "project-x"
+uv run matrix-llmagent --chronicler "Show me the current chapter" --arc "project-x"
 ```
 
 ## Development

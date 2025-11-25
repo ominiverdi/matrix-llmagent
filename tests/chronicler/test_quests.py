@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from irssi_llmagent.chronicler.chapters import chapter_append_paragraph
+from matrix_llmagent.chronicler.chapters import chapter_append_paragraph
 
 
 @pytest.mark.asyncio
@@ -36,7 +36,7 @@ async def test_quest_operator_triggers_and_announces(shared_agent):
                 third_call_event.set()
             return intermediate_para if call_counter["count"] == 1 else finished_para
 
-    with patch("irssi_llmagent.main.AgenticLLMActor", new=DummyActor):
+    with patch("matrix_llmagent.main.AgenticLLMActor", new=DummyActor):
         # Ensure varlink sender mock
         agent.irc_monitor.varlink_sender = AsyncMock()
         agent.irc_monitor.get_mynick = AsyncMock(return_value="botnick")
@@ -98,7 +98,7 @@ async def test_scan_and_trigger_open_quests(shared_agent):
         async def run_agent(self, context, *, progress_callback=None, arc: str):
             return next_para
 
-    with patch("irssi_llmagent.main.AgenticLLMActor", new=DummyActor2):
+    with patch("matrix_llmagent.main.AgenticLLMActor", new=DummyActor2):
         agent.irc_monitor.varlink_sender = AsyncMock()
         agent.irc_monitor.get_mynick = AsyncMock(return_value="botnick")
 
@@ -134,8 +134,8 @@ async def test_chapter_rollover_copies_unresolved_quests(shared_agent):
             return None
 
     with (
-        patch("irssi_llmagent.main.AgenticLLMActor", new=DummyActor3),
-        patch("irssi_llmagent.providers.ModelRouter.call_raw_with_model") as mock_router,
+        patch("matrix_llmagent.main.AgenticLLMActor", new=DummyActor3),
+        patch("matrix_llmagent.providers.ModelRouter.call_raw_with_model") as mock_router,
     ):
         # Mock the model router to avoid network calls during chronicle summarization
         mock_client = MagicMock()

@@ -2,7 +2,7 @@
 
 import time
 
-from irssi_llmagent.rate_limiter import RateLimiter
+from matrix_llmagent.rate_limiter import RateLimiter
 
 
 class TestRateLimiter:

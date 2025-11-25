@@ -1,19 +1,19 @@
-# irssi-llmagent Agent Guide
+# matrix-llmagent Agent Guide
 
 ## Build/Test Commands
 - Install dependencies: `uv sync --dev`
 - Run tests: `uv run pytest` - all tests must always succeed! You must assume any test failure is related to your changes, even if it doesn't appear to be at first.
-- Full e2e test in CLI mode: `uv run irssi-llmagent --message "your message here"`
+- Full e2e test in CLI mode: `uv run matrix-llmagent --message "your message here"`
 - Run linting: `uv run ruff check .`
 - Run formatting: `uv run ruff format .`
 - Run type checking: `uv run pyright`
 - NEVER use `git add -A` blindly, there may be untracked files that must not be committed; use `git add -u` instead
 
 ## Architecture
-- **Main Service**: `irssi_llmagent/main.py` - Core application coordinator managing shared resources (config, history, model router)
-- **Room Isolation**: IRC-specific functionality isolated in `rooms/irc/monitor.py` (IRCRoomMonitor class)
-- **Modular Structure**: Clean separation between platform-agnostic core and IRC-specific implementation
-- **Varlink Protocol**: Dual async socket architecture (events + sender) over UNIX socket at `~/.irssi/varlink.sock`
+- **Main Service**: `matrix_llmagent/main.py` - Core application coordinator managing shared resources (config, history, model router)
+- **Room Isolation**: Platform-specific functionality isolated in `rooms/` directory
+- **Modular Structure**: Clean separation between platform-agnostic core and platform-specific implementation
+- **Note**: Currently in migration from IRC (varlink) to Matrix (matrix-nio)
 - **APIs**: Anthropic Claude (sarcastic/serious modes with automatic classification using claude-3-5-haiku), Perplexity AI, E2B sandbox for Python code execution
 - **Config**: JSON-based configuration in `config.json` (copy from `config.json.example`)
   - Models MUST be fully-qualified as `provider:model` (e.g., `anthropic:claude-sonnet-4`). No defaults.
@@ -23,10 +23,10 @@
 - **Continuous Chronicling**: Automatic chronicling triggered when unchronicled messages exceed `history_size` threshold. Uses `chronicler.model` to summarize conversation activity into Chronicle chapters. Messages get linked via `chapter_id` field in ChatHistory. Includes safety limits (100 message batches, 7-day lookback) and overlap for context continuity
 - **Proactive Interjecting**: Channel-based whitelist feature using claude-3-haiku to scan non-directed messages and interject in serious conversations when useful. Includes rate limiting, test mode, and channel whitelisting
 - **Key Modules**:
-  - `rooms/irc/monitor.py` - IRCRoomMonitor (main IRC message processing, command handling, mode classification)
-  - `rooms/irc/varlink.py` - VarlinkClient (events), VarlinkSender (messages)
-  - `rooms/irc/autochronicler.py` - AutoChronicler (automatic chronicling of IRC messages when threshold exceeded)
-  - `rooms/proactive.py` - ProactiveDebouncer (channel-based proactive interjecting)
+  - `rooms/irc/monitor.py` - IRCRoomMonitor (IRC message processing - to be replaced with Matrix)
+  - `rooms/irc/varlink.py` - VarlinkClient (IRC protocol - to be replaced with Matrix)
+  - `rooms/irc/autochronicler.py` - AutoChronicler (automatic chronicling - to be adapted for Matrix)
+  - `rooms/proactive.py` - ProactiveDebouncer (proactive interjecting - platform-agnostic)
   - `history.py` - ChatHistory (persistent SQLite storage)
   - `providers/` - async API clients (anthropic, openai, perplexity) and base classes
   - `rate_limiter.py` - RateLimiter
