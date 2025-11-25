@@ -499,9 +499,8 @@ class TestToolRegistry:
     @pytest.mark.asyncio
     async def test_execute_tool_visit_webpage(self, mock_agent):
         """Test executing webpage visit tool."""
-        with patch.object(
-            WebpageVisitorExecutor, "execute", new_callable=AsyncMock
-        ) as mock_execute:
+        # Mock LocalWebpageVisitor since it's now the default
+        with patch.object(LocalWebpageVisitor, "execute", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = "Webpage content"
 
             tool_executors = create_tool_executors(agent=mock_agent, arc="test")

@@ -1069,7 +1069,7 @@ def create_tool_executors(
         search_executor = WebSearchExecutor(backend=search_provider)
 
     # Webpage visitor config
-    webpage_visitor_type = tools_config.get("webpage_visitor", "jina")
+    webpage_visitor_type = tools_config.get("webpage_visitor", "local")
     user_agent = tools_config.get("user_agent")
 
     if webpage_visitor_type == "local":
