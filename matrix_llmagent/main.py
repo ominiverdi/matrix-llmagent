@@ -13,9 +13,8 @@ from .agentic_actor import AgenticLLMActor
 from .chronicler.chronicle import Chronicle
 from .chronicler.quests import QuestOperator
 from .history import ChatHistory
+from .matrix_monitor import MatrixMonitor
 from .providers import ModelRouter
-# Matrix monitor will be imported here once implemented
-# from .matrix_monitor import MatrixMonitor
 
 # Set up logging
 root_logger = logging.getLogger()
@@ -76,9 +75,8 @@ class MatrixLLMAgent:
         chronicle_db_path = chronicler_config.get("database", {}).get("path", "chronicle.db")
         self.chronicle = Chronicle(chronicle_db_path)
 
-        # TODO: Initialize Matrix monitor once implemented
-        # self.matrix_monitor = MatrixMonitor(self)
-        self.matrix_monitor = None
+        # Initialize Matrix monitor
+        self.matrix_monitor = MatrixMonitor(self)
 
         self.quests = QuestOperator(self)
 
@@ -152,11 +150,6 @@ class MatrixLLMAgent:
         await self.quests.scan_and_trigger_open_quests()
 
         try:
-            if self.matrix_monitor is None:
-                logger.error(
-                    "Matrix monitor not yet implemented. See PLAN.md for migration status."
-                )
-                sys.exit(1)
             await self.matrix_monitor.run()
         finally:
             # Clean up shared resources

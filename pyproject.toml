@@ -19,6 +19,7 @@ dependencies = [
     "markdownify>=0.11.0",
     "e2b-code-interpreter<2",
     "openai>=1.40.0",
+    "matrix-nio>=0.24.0",
 ]
 
 [project.optional-dependencies]
