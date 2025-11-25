@@ -52,11 +52,14 @@ cmake -B build
 cmake --build build --config Release
 ```
 
-2. Start llama.cpp server:
+2. Start llama.cpp server with tool support:
 ```bash
 # Example with Llama 3.1 8B
-./build/bin/llama-server -m models/llama-3.1-8b-instruct.gguf --port 8080
+# IMPORTANT: Use --jinja flag for tool calling support (web browsing, code execution, etc.)
+./build/bin/llama-server -m models/llama-3.1-8b-instruct.gguf --port 8080 --jinja
 ```
+
+> **Note**: The `--jinja` flag enables tool calling, which is required for web browsing, code execution, and other agentic features. Without it, the bot will work but won't be able to use tools.
 
 3. Configure in `config.json`:
 ```json
@@ -131,21 +134,43 @@ The webpage visitor is **enabled by default** in local mode (no setup needed):
 
 ## Commands
 
-- `@botname: message` - Automatic mode (classifier decides which mode to use)
+- `@botname: message` - **Default (serious) mode** with web browsing enabled
 - `@botname: !h` - Show help and info about other modes
-- `@botname: !s <message>` - Serious mode (thoughtful, informative responses)
+- `@botname: !s <message>` - Serious mode (same as default - web tools enabled)
 - `@botname: !d <message>` - Sarcastic mode (witty, humorous responses)
-- `@botname: !a <message>` - Agent mode (full tool access for research and code execution)
+- `@botname: !a <message>` - Agent mode (advanced multi-turn research)
 - `@botname: !p <message>` - Perplexity mode (web search with Perplexity AI)
 - `@botname: !u <message>` - Unsafe mode (uncensored responses)
 
+**Quick Examples:**
+```
+@bot: visit https://python.org and summarize
+@bot: search for the latest news about AI
+@bot: !a research async Python patterns and create a comparison guide
+@bot: !d why do programmers prefer dark mode?
+```
+
 ## 🤖 Bot Modes
 
-### Serious Mode (`!s`)
-Standard mode for helpful, informative responses. Ideal for:
-- Technical questions
-- General knowledge queries
+### Serious Mode (`!s`) - Default Mode with Web Tools
+**Default mode** with web browsing capabilities enabled. The bot can:
+- Visit and analyze webpages (using local webpage visitor)
+- Search the web
+- Execute Python code
+- Provide thoughtful, informative responses
+
+Ideal for:
+- Technical questions with web research
+- Visiting and summarizing webpages
+- General knowledge queries with sources
 - Documentation requests
+
+**Example interactions:**
+```
+@bot: visit https://python.org and tell me what's new
+@bot: summarize the article at https://example.com/blog/post
+@bot: search for Python async best practices
+```
 
 ### Sarcastic Mode (`!d`)
 Witty, humorous responses with a cynical edge. Great for:
@@ -153,21 +178,21 @@ Witty, humorous responses with a cynical edge. Great for:
 - Jokes and memes
 - Light-hearted conversations
 
-### Agent Mode (`!a`) - Full Agentic Capabilities
-**Most powerful mode** with access to all tools for autonomous research and code execution. The agent can:
-- Search the web
-- Visit and analyze webpages
-- Execute Python code in a sandbox
-- Generate images
-- Create shareable artifacts
+### Agent Mode (`!a`) - Advanced Multi-Turn Research
+**Advanced mode** for complex multi-turn research tasks. Same tools as serious mode, but with:
+- Multi-turn autonomous task breakdown
+- Progress reporting
+- More thorough research approach
+- Better for complex, multi-step tasks
 
 **Example interactions:**
 ```
-@bot: !a summarize the latest Python 3.13 release notes
-@bot: !a create a visualization of the Fibonacci sequence
-@bot: !a search for async Python best practices and show examples
-@bot: !a analyze https://github.com/python/cpython and summarize recent changes
+@bot: !a analyze the Python 3.13 release notes and compare with 3.12
+@bot: !a research async Python patterns and create a detailed comparison
+@bot: !a investigate https://github.com/python/cpython recent changes and summarize top 5
 ```
+
+> **Note**: For simple webpage visits or single searches, use **serious mode** (default) without `!a` prefix!
 
 ### Perplexity Mode (`!p`)
 Uses Perplexity AI for web-enhanced responses with real-time information.
@@ -175,9 +200,9 @@ Uses Perplexity AI for web-enhanced responses with real-time information.
 ### Unsafe Mode (`!u`)
 Unrestricted responses that bypass typical LLM safety filters. Use responsibly.
 
-## 🛠️ Agent Tools & Capabilities
+## 🛠️ Tools & Capabilities
 
-When using **Agent Mode** (`!a`), the bot has access to powerful tools for autonomous task completion:
+**By default**, the bot has access to powerful tools in **serious mode** (no prefix needed). These same tools are available in agent mode (`!a`) for more complex multi-turn tasks:
 
 ### 🌐 Web Search (`web_search`)
 Search the web and get top results with titles, URLs, and descriptions.

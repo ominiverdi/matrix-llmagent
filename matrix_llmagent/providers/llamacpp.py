@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -167,11 +168,22 @@ class LlamaCppClient(BaseAPIClient):
         result = []
         for tc in tool_calls:
             function = tc.get("function", {})
+
+            # Parse arguments from JSON string to dict
+            arguments_str = function.get("arguments", "{}")
+            try:
+                arguments_dict = (
+                    json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                )
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse tool arguments: {arguments_str}")
+                arguments_dict = {}
+
             result.append(
                 {
                     "id": tc.get("id", ""),
                     "name": function.get("name", ""),
-                    "input": function.get("arguments", "{}"),
+                    "input": arguments_dict,
                 }
             )
 
@@ -196,19 +208,35 @@ class LlamaCppClient(BaseAPIClient):
         """Format tool results for next API call (OpenAI format).
 
         Args:
-            tool_results: List of dicts with 'tool_call_id', 'name', 'result'
+            tool_results: List of dicts with 'tool_use_id', 'type', 'content'
+                         (Anthropic format from actor.py)
 
         Returns:
             List of tool message dicts
         """
         formatted = []
         for result in tool_results:
+            # Handle Anthropic-style tool_use_id (from actor.py)
+            tool_id = result.get("tool_use_id", result.get("tool_call_id", ""))
+
+            # Extract content - could be string or complex structure
+            content = result.get("content", "")
+            if isinstance(content, list):
+                # Anthropic content blocks - convert to string
+                content_str = ""
+                for block in content:
+                    if block.get("type") == "text":
+                        content_str += block.get("text", "")
+                    elif block.get("type") == "image":
+                        content_str += "[Image]"
+            else:
+                content_str = str(content)
+
             formatted.append(
                 {
                     "role": "tool",
-                    "tool_call_id": result["tool_call_id"],
-                    "name": result["name"],
-                    "content": str(result["result"]),
+                    "tool_call_id": tool_id,
+                    "content": content_str,
                 }
             )
         return formatted

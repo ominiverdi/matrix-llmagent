@@ -138,11 +138,31 @@ class MatrixMonitor:
             )
             return
 
-        # Remove bot mention from message
+        # Remove bot mention from message (both user ID and display name)
         clean_message = re.sub(rf"{re.escape(self.bot_user_id)}:?\s*", "", message).strip()
+        clean_message = re.sub(
+            r"llm-assistant:?\s*", "", clean_message, flags=re.IGNORECASE
+        ).strip()
+        clean_message = re.sub(r"llm-assitant:?\s*", "", clean_message, flags=re.IGNORECASE).strip()
 
         # Parse command mode
         mode = self.determine_mode(clean_message)
+
+        # Strip mode prefix from message after determining mode
+        mode_prefixes = [
+            r"!s\s+",
+            r"!S\s+",
+            r"!d\s+",
+            r"!D\s+",
+            r"!u\s+",
+            r"!U\s+",
+            r"!a\s+",
+            r"!A\s+",
+            r"!p\s+",
+            r"!P\s+",
+        ]
+        for prefix in mode_prefixes:
+            clean_message = re.sub(f"^{prefix}", "", clean_message)
 
         logger.info(f"Processing command from {sender} in {room_id}, mode: {mode}")
 

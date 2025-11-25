@@ -678,3 +678,70 @@ class TestToolDefinitions:
         assert filtered_tools[0]["name"] == "web_search"
         assert filtered_tools[0]["description"] == "Search the web"
         assert filtered_tools[1]["name"] == "execute_python"
+
+
+class TestLocalWebpageVisitorIntegration:
+    """Integration tests for LocalWebpageVisitor with real HTTP requests."""
+
+    @pytest.mark.asyncio
+    async def test_visit_real_webpage_example_com(self):
+        """Test visiting example.com and extracting content."""
+        visitor = LocalWebpageVisitor()
+
+        # Visit example.com - a simple, stable test page
+        result = await visitor.execute("https://example.com")
+
+        # Verify we got markdown content back
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+        # example.com should have these key phrases
+        assert "example" in result.lower() or "domain" in result.lower()
+
+        # Should not contain HTML tags (converted to markdown)
+        assert "<html>" not in result.lower()
+        assert "<body>" not in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_visit_real_webpage_python_org(self):
+        """Test visiting python.org and extracting content."""
+        visitor = LocalWebpageVisitor()
+
+        # Visit Python's homepage
+        result = await visitor.execute("https://www.python.org")
+
+        # Verify we got content
+        assert isinstance(result, str)
+        assert len(result) > 100  # Should have substantial content
+
+        # Should contain Python-related content
+        assert "python" in result.lower()
+
+        # Should be converted to markdown (no raw HTML)
+        assert not result.strip().startswith("<")
+
+    @pytest.mark.asyncio
+    async def test_visit_invalid_url(self):
+        """Test visiting an invalid URL."""
+        visitor = LocalWebpageVisitor()
+
+        # Try to visit a non-existent domain
+        try:
+            result = await visitor.execute(
+                "https://this-domain-definitely-does-not-exist-12345.com"
+            )
+
+            # Should return an error message, not crash
+            assert isinstance(result, str)
+            assert (
+                "error" in result.lower()
+                or "failed" in result.lower()
+                or "could not" in result.lower()
+            )
+        except Exception as e:
+            # It's OK if it raises an exception for invalid domain
+            assert (
+                "error" in str(e).lower()
+                or "failed" in str(e).lower()
+                or "cannot" in str(e).lower()
+            )
