@@ -1,4 +1,4 @@
-"""Main application entry point for irssi-llmagent."""
+"""Main application entry point for matrix-llmagent."""
 
 import argparse
 import asyncio
@@ -14,7 +14,8 @@ from .chronicler.chronicle import Chronicle
 from .chronicler.quests import QuestOperator
 from .history import ChatHistory
 from .providers import ModelRouter
-from .rooms.irc import IRCRoomMonitor
+# Matrix monitor will be imported here once implemented
+# from .matrix_monitor import MatrixMonitor
 
 # Set up logging
 root_logger = logging.getLogger()
@@ -48,23 +49,37 @@ logging.getLogger("primp").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
-class IRSSILLMAgent:
-    """Main IRC LLM agent application."""
+class MatrixLLMAgent:
+    """Main Matrix LLM agent application."""
 
     def __init__(self, config_path: str = "config.json"):
         self.config = self.load_config(config_path)
         self.model_router: ModelRouter = ModelRouter(self.config)
-        # Get IRC config section
-        irc_config = self.config["rooms"]["irc"]
+
+        # TODO: Update for Matrix config structure
+        # For now, use legacy config structure for compatibility
+        try:
+            # Try Matrix config first
+            room_config = self.config.get("matrix", {}).get("command", {})
+            history_size = room_config.get("history_size", 30)
+        except (KeyError, TypeError):
+            # Fallback to IRC config for backward compatibility during migration
+            room_config = self.config.get("rooms", {}).get("irc", {}).get("command", {})
+            history_size = room_config.get("history_size", 30)
+
         self.history = ChatHistory(
             self.config.get("history", {}).get("database", {}).get("path", "chat_history.db"),
-            irc_config["command"]["history_size"],
+            history_size,
         )
         # Initialize chronicle
         chronicler_config = self.config.get("chronicler", {})
         chronicle_db_path = chronicler_config.get("database", {}).get("path", "chronicle.db")
         self.chronicle = Chronicle(chronicle_db_path)
-        self.irc_monitor = IRCRoomMonitor(self)
+
+        # TODO: Initialize Matrix monitor once implemented
+        # self.matrix_monitor = MatrixMonitor(self)
+        self.matrix_monitor = None
+
         self.quests = QuestOperator(self)
 
     async def run_actor(
@@ -129,7 +144,7 @@ class IRSSILLMAgent:
             sys.exit(1)
 
     async def run(self) -> None:
-        """Run the main agent loop by delegating to IRC monitor."""
+        """Run the main agent loop by delegating to Matrix monitor."""
         # Initialize shared resources
         await self.history.initialize()
         await self.chronicle.initialize()
@@ -137,7 +152,12 @@ class IRSSILLMAgent:
         await self.quests.scan_and_trigger_open_quests()
 
         try:
-            await self.irc_monitor.run()
+            if self.matrix_monitor is None:
+                logger.error(
+                    "Matrix monitor not yet implemented. See PLAN.md for migration status."
+                )
+                sys.exit(1)
+            await self.matrix_monitor.run()
         finally:
             # Clean up shared resources
             await self.history.close()
@@ -154,47 +174,20 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         print("Please create config.json from config.json.example")
         sys.exit(1)
 
-    print(f"🤖 Simulating IRC message: {message}")
+    print(f"🤖 Simulating message: {message}")
+    print("=" * 60)
+    print("⚠️  CLI message simulation not yet implemented for Matrix.")
+    print("   See PLAN.md Phase 4 for Matrix monitor implementation status.")
     print("=" * 60)
 
-    try:
-        # Create agent instance
-        agent = IRSSILLMAgent(str(config_file))
-
-        # Initialize shared resources for CLI mode
-        await agent.history.initialize()
-        await agent.chronicle.initialize()
-
-        # Mock the varlink sender
-        class MockSender:
-            async def send_message(self, target: str, message: str, server: str):
-                print(f"📤 Bot response: {message}")
-
-        agent.irc_monitor.varlink_sender = MockSender()  # type: ignore
-
-        # Simulate message handling
-        await agent.irc_monitor.handle_command(
-            server="testserver",
-            chan_name="#testchannel",
-            target="#testchannel",
-            nick="testuser",
-            message=message,
-            mynick="testbot",
-        )
-
-    except Exception as e:
-        print(f"❌ Error handling message: {e}")
-        import traceback
-
-        traceback.print_exc()
-        sys.exit(1)
-    finally:
-        # Ensure any shared resources held by the agent are closed
-        try:
-            if hasattr(agent, "history"):
-                await agent.history.close()
-        except Exception:
-            pass
+    # TODO: Implement CLI message handling once Matrix monitor is ready
+    # try:
+    #     agent = MatrixLLMAgent(str(config_file))
+    #     await agent.history.initialize()
+    #     await agent.chronicle.initialize()
+    #     # Simulate Matrix message handling
+    # finally:
+    #     await agent.history.close()
 
 
 async def cli_chronicler(arc: str, instructions: str, config_path: str | None = None) -> None:
@@ -212,7 +205,7 @@ async def cli_chronicler(arc: str, instructions: str, config_path: str | None = 
 
     try:
         # Create agent instance
-        agent = IRSSILLMAgent(str(config_file))
+        agent = MatrixLLMAgent(str(config_file))
         await agent.chronicle.initialize()
 
         print(
@@ -229,9 +222,11 @@ async def cli_chronicler(arc: str, instructions: str, config_path: str | None = 
 
 def main() -> None:
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="irssi-llmagent - IRC chatbot with AI and tools")
+    parser = argparse.ArgumentParser(
+        description="matrix-llmagent - Matrix chatbot with AI and tools"
+    )
     parser.add_argument(
-        "--message", type=str, help="Run in CLI mode to simulate handling an IRC message"
+        "--message", type=str, help="Run in CLI mode to simulate handling a message"
     )
     parser.add_argument(
         "--config", type=str, help="Path to config file (default: config.json in project root)"
@@ -257,7 +252,7 @@ def main() -> None:
     if args.message:
         asyncio.run(cli_message(args.message, args.config))
     else:
-        agent = IRSSILLMAgent()
+        agent = MatrixLLMAgent()
         asyncio.run(agent.run())
 
 

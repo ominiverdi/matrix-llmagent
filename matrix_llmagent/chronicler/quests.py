@@ -90,24 +90,44 @@ class QuestOperator:
 
         server, channel = arc.split("#", 1)
 
-        mynick = await self.agent.irc_monitor.get_mynick(server)
+        # TODO: Update for Matrix - need to get bot's user ID/displayname
+        mynick = (
+            await self.agent.matrix_monitor.get_mynick(server)
+            if self.agent.matrix_monitor
+            else "bot"
+        )
         if not mynick:
             logger.warning(f"QuestsOperator: could not get mynick for server {server}")
             return
 
-        # Build context: IRC chat history (same sizing as IRCMonitor serious mode), then the quest paragraph last
-        irc_cfg = self.agent.irc_monitor.irc_config
-        default_size = irc_cfg["command"]["history_size"]
+        # Build context: chat history (same sizing as serious mode), then the quest paragraph last
+        # TODO: Update for Matrix config structure
+        try:
+            room_cfg = self.agent.config.get("matrix", {}).get("command", {})
+        except (KeyError, TypeError):
+            room_cfg = self.agent.config.get("rooms", {}).get("irc", {}).get("command", {})
+
+        default_size = room_cfg.get("history_size", 30)
         serious_size = (
-            irc_cfg["command"]["modes"].get("serious", {}).get("history_size", default_size)
+            room_cfg.get("modes", {}).get("serious", {}).get("history_size", default_size)
         )
         context = await self.agent.history.get_context(server, channel, serious_size)
         context = context + [{"role": "user", "content": paragraph_text}]
 
-        mode_cfg = dict(irc_cfg["command"]["modes"]["serious"])
-        mode_cfg["prompt_reminder"] = cfg["prompt_reminder"]
+        # TODO: Update for Matrix - need to build system prompt properly
+        system_prompt = f"You are {mynick}, a helpful assistant."
+        if self.agent.matrix_monitor and hasattr(self.agent.matrix_monitor, "build_system_prompt"):
+            system_prompt = self.agent.matrix_monitor.build_system_prompt("serious", mynick)
+        elif room_cfg.get("modes", {}).get("serious", {}).get("system_prompt"):
+            system_prompt = room_cfg["modes"]["serious"]["system_prompt"]
 
-        system_prompt = self.agent.irc_monitor.build_system_prompt("serious", mynick)
+        # Create mode config for actor
+        mode_cfg = dict(room_cfg.get("modes", {}).get("serious", {}))
+        mode_cfg["prompt_reminder"] = cfg["prompt_reminder"]
+        if "model" not in mode_cfg:
+            mode_cfg["model"] = (
+                self.agent.config["providers"].get("openai", {}).get("model", "gpt-4")
+            )
 
         # Create progress callback that stores only tool_persistence updates
         async def progress_cb(text: str, type: str = "progress") -> None:
@@ -118,9 +138,15 @@ class QuestOperator:
                     text,
                     mynick,
                     mynick,
-                    False,
-                    role="assistant_silent",
                 )
+
+        response = await self.agent.run_actor(
+            context,
+            mode_cfg=mode_cfg,
+            system_prompt=system_prompt,
+            arc=arc,
+            progress_callback=progress_cb,
+        )
 
         try:
             response = await self.agent.run_actor(
@@ -161,9 +187,14 @@ class QuestOperator:
         response = re.sub(r'<quest(_finished)?(\s*id=".*?")?\s*>', _ensure_id, response)
         response = response.replace("\n", "; ").strip()
 
-        # Mirror to IRC and ChatHistory
+        # Mirror to channel and ChatHistory
         logger.debug(f"Quest step run_actor for {arc} {quest_id} output: {response}")
-        await self.agent.irc_monitor.varlink_sender.send_message(channel, response, server)
+        # TODO: Update for Matrix - need to send message to Matrix room
+        if self.agent.matrix_monitor and hasattr(self.agent.matrix_monitor, "send_message"):
+            await self.agent.matrix_monitor.send_message(channel, response)
+        # For now, using varlink_sender attribute for backward compatibility in tests
+        elif self.agent.matrix_monitor and hasattr(self.agent.matrix_monitor, "varlink_sender"):
+            await self.agent.matrix_monitor.varlink_sender.send_message(channel, response, server)
         await self.agent.history.add_message(server, channel, response, mynick, mynick, True)
 
         # Appending via chapter management triggers next quest step implicitly

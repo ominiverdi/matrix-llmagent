@@ -233,12 +233,16 @@ def mock_model_call():
 @pytest.fixture(scope="function")
 async def shared_agent(temp_config_file):
     """Shared agent fixture that can be reused across tests."""
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, Mock
 
-    from matrix_llmagent.main import IRSSILLMAgent
+    from matrix_llmagent.main import MatrixLLMAgent
 
-    agent = IRSSILLMAgent(temp_config_file)
-    agent.irc_monitor.varlink_sender = AsyncMock()
+    agent = MatrixLLMAgent(temp_config_file)
+    # Mock the matrix monitor for tests (not yet implemented)
+    agent.matrix_monitor = Mock()
+    agent.matrix_monitor.send_message = AsyncMock()
+    agent.matrix_monitor.varlink_sender = AsyncMock()  # For tests that expect this
+    agent.matrix_monitor.get_mynick = AsyncMock(return_value="botnick")
 
     # Initialize databases if needed
     if hasattr(agent, "history"):
@@ -256,16 +260,20 @@ async def shared_agent(temp_config_file):
 @pytest.fixture(scope="function")
 async def shared_agent_with_db(temp_config_file, temp_db_path):
     """Shared agent fixture with isolated database."""
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, Mock
 
     from matrix_llmagent.history import ChatHistory
-    from matrix_llmagent.main import IRSSILLMAgent
+    from matrix_llmagent.main import MatrixLLMAgent
 
-    agent = IRSSILLMAgent(temp_config_file)
-    agent.irc_monitor.varlink_sender = AsyncMock()
+    agent = MatrixLLMAgent(temp_config_file)
+    # Mock the matrix monitor for tests (not yet implemented)
+    agent.matrix_monitor = Mock()
+    agent.matrix_monitor.send_message = AsyncMock()
+    agent.matrix_monitor.varlink_sender = AsyncMock()
+    agent.matrix_monitor.get_mynick = AsyncMock(return_value="botnick")
 
     # Use isolated database
-    agent.history = ChatHistory(temp_db_path)
+    agent.history = ChatHistory(str(temp_db_path), 30)
     await agent.history.initialize()
 
     # Initialize chronicle database

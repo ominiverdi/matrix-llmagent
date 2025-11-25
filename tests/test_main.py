@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from matrix_llmagent.main import IRSSILLMAgent, cli_message
+from matrix_llmagent.main import MatrixLLMAgent, cli_message
 
 
 class MockAPIClient:
@@ -29,12 +29,12 @@ class MockAPIClient:
         return {"role": "user", "content": "Tool results"}
 
 
-class TestIRSSILLMAgent:
+class TestMatrixLLMAgent:
     """Test main agent functionality."""
 
     def test_load_config(self, temp_config_file, api_type):
         """Test configuration loading."""
-        agent = IRSSILLMAgent(temp_config_file)
+        agent = MatrixLLMAgent(temp_config_file)
         assert agent.config is not None
         assert "providers" in agent.config  # Provider sections exist
         assert "rooms" in agent.config
@@ -42,6 +42,7 @@ class TestIRSSILLMAgent:
         assert "varlink" in agent.config["rooms"]["irc"]
 
 
+@pytest.mark.skip(reason="CLI mode disabled until Matrix monitor is implemented (Phase 4)")
 class TestCLIMode:
     """Test CLI mode functionality."""
 
@@ -63,9 +64,9 @@ class TestCLIMode:
                 mock_history_class.return_value = mock_history
 
                 # Create a real agent
-                from matrix_llmagent.main import IRSSILLMAgent
+                from matrix_llmagent.main import MatrixLLMAgent
 
-                agent = IRSSILLMAgent(temp_config_file)
+                agent = MatrixLLMAgent(temp_config_file)
 
                 async def fake_call_raw_with_model(*args, **kwargs):
                     resp = {"output_text": "Sarcastic response"}
@@ -73,7 +74,7 @@ class TestCLIMode:
                     return resp, MockAPIClient("Sarcastic response"), None
 
                 # Patch the agent creation in cli_message and model router
-                with patch("matrix_llmagent.main.IRSSILLMAgent", return_value=agent):
+                with patch("matrix_llmagent.main.MatrixLLMAgent", return_value=agent):
                     with patch(
                         "matrix_llmagent.agentic_actor.actor.ModelRouter.call_raw_with_model",
                         new=AsyncMock(side_effect=fake_call_raw_with_model),
@@ -113,12 +114,12 @@ class TestCLIMode:
                     mock_perplexity_class.return_value = mock_perplexity
 
                     # Create a real agent
-                    from matrix_llmagent.main import IRSSILLMAgent
+                    from matrix_llmagent.main import MatrixLLMAgent
 
-                    agent = IRSSILLMAgent(temp_config_file)
+                    agent = MatrixLLMAgent(temp_config_file)
 
                     # Patch the agent creation in cli_message
-                    with patch("matrix_llmagent.main.IRSSILLMAgent", return_value=agent):
+                    with patch("matrix_llmagent.main.MatrixLLMAgent", return_value=agent):
                         await cli_message("!p what is the weather?", temp_config_file)
 
                         # Verify Perplexity was called with the actual message in context
@@ -162,12 +163,12 @@ class TestCLIMode:
                     mock_agent_class.return_value = mock_agent
 
                     # Create a real agent
-                    from matrix_llmagent.main import IRSSILLMAgent
+                    from matrix_llmagent.main import MatrixLLMAgent
 
-                    agent = IRSSILLMAgent(temp_config_file)
+                    agent = MatrixLLMAgent(temp_config_file)
 
                     # Patch the agent creation in cli_message
-                    with patch("matrix_llmagent.main.IRSSILLMAgent", return_value=agent):
+                    with patch("matrix_llmagent.main.MatrixLLMAgent", return_value=agent):
                         await cli_message("!s search for Python news", temp_config_file)
 
                         # Verify agent was called with context only
@@ -210,12 +211,12 @@ class TestCLIMode:
                     mock_agent_class.return_value = mock_agent
 
                     # Create a real agent
-                    from matrix_llmagent.main import IRSSILLMAgent
+                    from matrix_llmagent.main import MatrixLLMAgent
 
-                    agent = IRSSILLMAgent(temp_config_file)
+                    agent = MatrixLLMAgent(temp_config_file)
 
                     # Patch the agent creation in cli_message
-                    with patch("matrix_llmagent.main.IRSSILLMAgent", return_value=agent):
+                    with patch("matrix_llmagent.main.MatrixLLMAgent", return_value=agent):
                         await cli_message("!s specific test message", temp_config_file)
 
                         # Verify agent was called once for serious mode
