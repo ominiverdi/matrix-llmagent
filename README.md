@@ -98,8 +98,242 @@ Edit `config.json` based on `config.json.example` to set:
 
 ## Commands
 
-- `@botname: message` - Automatic mode
+- `@botname: message` - Automatic mode (classifier decides which mode to use)
 - `@botname: !h` - Show help and info about other modes
+- `@botname: !s <message>` - Serious mode (thoughtful, informative responses)
+- `@botname: !d <message>` - Sarcastic mode (witty, humorous responses)
+- `@botname: !a <message>` - Agent mode (full tool access for research and code execution)
+- `@botname: !p <message>` - Perplexity mode (web search with Perplexity AI)
+- `@botname: !u <message>` - Unsafe mode (uncensored responses)
+
+## 🤖 Bot Modes
+
+### Serious Mode (`!s`)
+Standard mode for helpful, informative responses. Ideal for:
+- Technical questions
+- General knowledge queries
+- Documentation requests
+
+### Sarcastic Mode (`!d`)
+Witty, humorous responses with a cynical edge. Great for:
+- Casual banter
+- Jokes and memes
+- Light-hearted conversations
+
+### Agent Mode (`!a`) - Full Agentic Capabilities
+**Most powerful mode** with access to all tools for autonomous research and code execution. The agent can:
+- Search the web
+- Visit and analyze webpages
+- Execute Python code in a sandbox
+- Generate images
+- Create shareable artifacts
+
+**Example interactions:**
+```
+@bot: !a summarize the latest Python 3.13 release notes
+@bot: !a create a visualization of the Fibonacci sequence
+@bot: !a search for async Python best practices and show examples
+@bot: !a analyze https://github.com/python/cpython and summarize recent changes
+```
+
+### Perplexity Mode (`!p`)
+Uses Perplexity AI for web-enhanced responses with real-time information.
+
+### Unsafe Mode (`!u`)
+Unrestricted responses that bypass typical LLM safety filters. Use responsibly.
+
+## 🛠️ Agent Tools & Capabilities
+
+When using **Agent Mode** (`!a`), the bot has access to powerful tools for autonomous task completion:
+
+### 🌐 Web Search (`web_search`)
+Search the web and get top results with titles, URLs, and descriptions.
+
+**Supported Providers:**
+- **Wikipedia** - Free, no API key required
+- **DuckDuckGo** - Free, no API key required  
+- **Brave Search** - Requires API key ([get one](https://brave.com/search/api/))
+- **Jina AI** - Requires API key, best quality ([get one](https://jina.ai/))
+
+**Configuration:**
+```json
+{
+  "tools": {
+    "search_provider": "jina",
+    "jina": {
+      "api_key": "your-jina-api-key"
+    },
+    "brave": {
+      "api_key": "your-brave-api-key"
+    }
+  }
+}
+```
+
+### 📄 Web Crawler (`visit_webpage`)
+Visit and analyze any webpage, converting HTML to clean Markdown.
+
+**Features:**
+- Converts webpages to readable Markdown using Jina.ai
+- Direct image fetching (JPG, PNG, GIF, WebP)
+- Handles up to 40KB of text content
+- Automatic retries on failures
+- Content truncation warnings
+
+**Example:**
+```
+User: !a visit https://python.org/downloads and tell me about the latest version
+Bot: [Fetches page, converts to Markdown, analyzes content]
+     Python 3.13.1 is now available with improved performance...
+```
+
+### 🐍 Python Code Execution (`execute_python`)
+Execute Python code in a secure **E2B sandbox** environment.
+
+**Features:**
+- Persistent sandbox across multiple calls
+- 180-second timeout per execution
+- Captures stdout, stderr, and return values
+- Supports plots and images (matplotlib, seaborn, etc.)
+- Full isolation - safe for untrusted code
+- Includes popular libraries (numpy, pandas, requests, etc.)
+
+**Setup:**
+```bash
+# Get API key from https://e2b.dev
+export E2B_API_KEY="your-e2b-api-key"
+```
+
+**Configuration:**
+```json
+{
+  "tools": {
+    "e2b": {
+      "api_key": "your-e2b-api-key"
+    }
+  }
+}
+```
+
+**Example:**
+```
+User: !a create a bar chart of top 5 programming languages
+Bot: [Executes matplotlib code in sandbox]
+     ✅ Generated plot showing Python, JavaScript, Java, C++, Go
+     [Returns plot data/description]
+```
+
+### 📦 Artifact Sharing (`share_artifact`)
+Create shareable public links for scripts, reports, and data.
+
+**Configuration:**
+```json
+{
+  "tools": {
+    "artifacts": {
+      "path": "/path/to/artifacts",
+      "url": "https://yourdomain.com/artifacts"
+    }
+  }
+}
+```
+
+**Use Cases:**
+- Share generated scripts
+- Publish detailed reports
+- Provide downloadable data files
+
+### 🎨 Image Generation (`generate_image`)
+Generate AI images using state-of-the-art models via OpenRouter.
+
+**Configuration:**
+```json
+{
+  "tools": {
+    "image_gen": {
+      "model": "openrouter:google/gemini-2.5-flash-preview-image"
+    }
+  }
+}
+```
+
+**Supported models:**
+- Google Gemini 2.5 Flash (fast, high quality)
+- Stability AI models (Stable Diffusion)
+- Flux models (artistic style)
+
+**Example:**
+```
+User: !a generate an image of a futuristic city at sunset
+Bot: [Generates image using configured model]
+     ✅ Image generated: [URL to image]
+```
+
+### 📊 Other Agent Tools
+
+- **`progress_report`** - Send real-time progress updates during long operations
+- **`make_plan`** - Formulate research/execution strategy before acting
+- **`final_answer`** - Structured final response with thinking process
+- **Chronicle tools** - Access conversation history and memory
+
+### 🔧 Tool Configuration
+
+**Enable/Disable Tools Per Mode:**
+```json
+{
+  "matrix": {
+    "command": {
+      "modes": {
+        "serious": {
+          "model": "anthropic:claude-sonnet-4",
+          "allowed_tools": []  // Disable all tools
+        },
+        "agent": {
+          "model": "anthropic:claude-sonnet-4",
+          "allowed_tools": null  // Enable all tools (default)
+        }
+      }
+    }
+  }
+}
+```
+
+**Tool Requirements:**
+| Tool | API Key Required | Cost | Setup |
+|------|------------------|------|-------|
+| `web_search` (Wikipedia/DDG) | ❌ No | Free | None |
+| `web_search` (Brave) | ✅ Yes | Paid | [Brave API](https://brave.com/search/api/) |
+| `web_search` (Jina) | ✅ Yes | Free tier available | [Jina AI](https://jina.ai/) |
+| `visit_webpage` | ⚠️ Optional | Free (rate limited) / Paid | [Jina API](https://jina.ai/) for higher limits |
+| `execute_python` | ✅ Yes | Paid | [E2B](https://e2b.dev) |
+| `generate_image` | ✅ Yes | Paid | OpenRouter account |
+| `share_artifact` | ❌ No | Free | Configure local path + URL |
+
+**Note:** For llama.cpp models to support tools, start the server with `--jinja` flag:
+```bash
+./llama-server -m model.gguf --port 8080 --jinja
+```
+
+### 🎯 Multi-Turn Agent Flow
+
+When you invoke agent mode, the bot operates in a **multi-turn loop**:
+
+1. **Planning** - Analyzes request, formulates approach
+2. **Tool Execution** - Calls necessary tools (search, code, web visits)
+3. **Iteration** - Can chain multiple tools (up to 5 iterations)
+4. **Synthesis** - Combines results into final answer
+
+**Example Flow:**
+```
+User: "Compare the performance of Python list vs deque"
+
+Agent:
+  Turn 1: make_plan("Research Python collections, run benchmarks")
+  Turn 2: web_search("python list vs deque performance")
+  Turn 3: visit_webpage("https://docs.python.org/3/library/collections.html")
+  Turn 4: execute_python("import timeit; # benchmark code...")
+  Turn 5: final_answer("Based on benchmarks, deque is 5x faster for...")
+```
 
 ## CLI Testing Mode
 
