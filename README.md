@@ -96,6 +96,39 @@ Edit `config.json` based on `config.json.example` to set:
 - Custom prompts for various modes
 - Matrix connection settings (homeserver, credentials)
 
+### Quick Start: Webpage Visitor
+
+The webpage visitor is **enabled by default** in local mode (no setup needed):
+
+```json
+{
+  "tools": {
+    "webpage_visitor": "local"  // Already configured, works out of the box
+  }
+}
+```
+
+**Want better quality?** Switch to Jina mode (optional):
+```json
+{
+  "tools": {
+    "webpage_visitor": "jina",
+    "jina": {
+      "api_key": "your-jina-api-key"  // Get from https://jina.ai
+    }
+  }
+}
+```
+
+**Customize the User-Agent** (optional for local mode):
+```json
+{
+  "tools": {
+    "user_agent": "Mozilla/5.0 (compatible; YourBotName/1.0; +https://your-repo-url)"
+  }
+}
+```
+
 ## Commands
 
 - `@botname: message` - Automatic mode (classifier decides which mode to use)

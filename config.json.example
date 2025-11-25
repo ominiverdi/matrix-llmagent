@@ -49,7 +49,7 @@
     "search_provider": "wikipedia,google,bing,brave",
     "_search_provider_note": "It is VERY RECOMMENDED to get a jina API key (mandatory) and then set search_provider to 'jina'",
     "webpage_visitor": "local",
-    "_webpage_visitor_note": "Options: 'local' (privacy-friendly, no API calls) or 'jina' (higher quality, requires external service). Default: 'jina'",
+    "_webpage_visitor_note": "Options: 'local' (privacy-friendly, no API calls) or 'jina' (higher quality, requires external service). Default: 'local'",
     "user_agent": "Mozilla/5.0 (compatible; matrix-llmagent/1.0; +https://github.com/yourusername/matrix-llmagent)",
     "_user_agent_note": "Custom User-Agent for local webpage visitor. Update the GitHub URL to your repo.",
     "artifacts": {
