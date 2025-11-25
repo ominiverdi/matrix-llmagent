@@ -173,17 +173,45 @@ Search the web and get top results with titles, URLs, and descriptions.
 ### 📄 Web Crawler (`visit_webpage`)
 Visit and analyze any webpage, converting HTML to clean Markdown.
 
-**Features:**
-- Converts webpages to readable Markdown using Jina.ai
+**Two Modes Available:**
+
+**1. Local Mode** (Privacy-Friendly, Default)
+- Fetches and converts HTML locally using readability + markdownify
+- No external API calls - your URLs stay private
+- Extracts main article content, removes navigation/ads
+- Works offline (no rate limits)
+- Supports custom User-Agent configuration
+
+**2. Jina.ai Mode** (Higher Quality)
+- Uses Jina.ai Reader service for conversion
+- Better quality Markdown output
+- Handles JavaScript-rendered content better
+- Requires internet connection
+- Free tier: 20 requests/min, paid: 500 req/min
+
+**Common Features:**
 - Direct image fetching (JPG, PNG, GIF, WebP)
 - Handles up to 40KB of text content
 - Automatic retries on failures
 - Content truncation warnings
 
+**Configuration:**
+```json
+{
+  "tools": {
+    "webpage_visitor": "local",  // or "jina"
+    "user_agent": "Mozilla/5.0 (compatible; matrix-llmagent/1.0; +https://github.com/yourusername/matrix-llmagent)",
+    "jina": {
+      "api_key": "your-jina-api-key"  // Only needed for jina mode
+    }
+  }
+}
+```
+
 **Example:**
 ```
 User: !a visit https://python.org/downloads and tell me about the latest version
-Bot: [Fetches page, converts to Markdown, analyzes content]
+Bot: [Fetches page locally, converts to Markdown, analyzes content]
      Python 3.13.1 is now available with improved performance...
 ```
 
@@ -304,7 +332,8 @@ Bot: [Generates image using configured model]
 | `web_search` (Wikipedia/DDG) | ❌ No | Free | None |
 | `web_search` (Brave) | ✅ Yes | Paid | [Brave API](https://brave.com/search/api/) |
 | `web_search` (Jina) | ✅ Yes | Free tier available | [Jina AI](https://jina.ai/) |
-| `visit_webpage` | ⚠️ Optional | Free (rate limited) / Paid | [Jina API](https://jina.ai/) for higher limits |
+| `visit_webpage` (local) | ❌ No | Free | Built-in (default) |
+| `visit_webpage` (jina) | ⚠️ Optional | Free tier / Paid | [Jina API](https://jina.ai/) for higher quality |
 | `execute_python` | ✅ Yes | Paid | [E2B](https://e2b.dev) |
 | `generate_image` | ✅ Yes | Paid | OpenRouter account |
 | `share_artifact` | ❌ No | Free | Configure local path + URL |

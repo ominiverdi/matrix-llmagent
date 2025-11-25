@@ -7,6 +7,7 @@ import pytest
 
 from matrix_llmagent.agentic_actor.tools import (
     JinaSearchExecutor,
+    LocalWebpageVisitor,
     PythonExecutorE2B,
     ShareArtifactExecutor,
     WebpageVisitorExecutor,
@@ -453,6 +454,31 @@ class TestToolExecutors:
         result = await executor.execute("test content")
 
         assert result.startswith("Error: Failed to create artifacts directory:")
+
+    @pytest.mark.asyncio
+    async def test_local_webpage_visitor_invalid_url(self):
+        """Test local webpage visitor with invalid URL."""
+        executor = LocalWebpageVisitor()
+
+        with pytest.raises(ValueError, match="Invalid URL"):
+            await executor.execute("not-a-url")
+
+    @pytest.mark.asyncio
+    async def test_local_webpage_visitor_initialization(self):
+        """Test local webpage visitor initialization with custom user agent."""
+        executor = LocalWebpageVisitor(user_agent="CustomBot/1.0")
+
+        assert executor.user_agent == "CustomBot/1.0"
+        assert executor.max_content_length == 40000
+        assert executor.timeout == 60
+
+    @pytest.mark.asyncio
+    async def test_local_webpage_visitor_default_user_agent(self):
+        """Test local webpage visitor with default user agent."""
+        executor = LocalWebpageVisitor()
+
+        assert "matrix-llmagent" in executor.user_agent
+        assert executor.user_agent.startswith("Mozilla/5.0")
 
 
 class TestToolRegistry:

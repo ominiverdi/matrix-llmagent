@@ -365,8 +365,121 @@ class JinaSearchExecutor:
                 return f"{warning_prefix}Search failed: {e}"
 
 
+class LocalWebpageVisitor:
+    """Local webpage visitor that converts HTML to Markdown without external services."""
+
+    def __init__(
+        self,
+        max_content_length: int = 40000,
+        timeout: int = 60,
+        max_image_size: int = 3_500_000,
+        progress_callback: Any | None = None,
+        user_agent: str | None = None,
+    ):
+        self.max_content_length = max_content_length
+        self.timeout = timeout
+        self.max_image_size = max_image_size
+        self.progress_callback = progress_callback
+        self.user_agent = (
+            user_agent
+            or "Mozilla/5.0 (compatible; matrix-llmagent/1.0; +https://github.com/matrix-llmagent)"
+        )
+
+    async def execute(self, url: str) -> str | list[dict]:
+        """Visit webpage and return content as markdown, or image data for images."""
+        logger.info(f"Visiting {url} (local mode)")
+
+        # Basic URL validation
+        if not url.startswith(("http://", "https://")):
+            raise ValueError("Invalid URL. Must start with http:// or https://")
+
+        async with aiohttp.ClientSession() as session:
+            # First, check the original URL for content-type to detect images
+            try:
+                async with session.head(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                    headers={"User-Agent": self.user_agent},
+                ) as head_response:
+                    content_type = head_response.headers.get("content-type", "").lower()
+
+                    if content_type.startswith("image/"):
+                        try:
+                            content_type, image_b64 = await fetch_image_b64(
+                                session, url, self.max_image_size, self.timeout
+                            )
+                            # Return Anthropic content blocks with image
+                            return [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": content_type,
+                                        "data": image_b64,
+                                    },
+                                }
+                            ]
+                        except ValueError as e:
+                            return f"Error: {e}"
+            except Exception as e:
+                # HEAD request failed, continue with GET
+                logger.debug(f"HEAD request failed for {url}: {e}")
+
+            # Fetch HTML content
+            try:
+                async with session.get(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                    headers={"User-Agent": self.user_agent},
+                ) as response:
+                    response.raise_for_status()
+                    html = await response.text()
+
+                    # Extract main content using readability
+                    try:
+                        from readability import Document
+                        from markdownify import markdownify as md
+
+                        doc = Document(html)
+                        title = doc.title()
+                        clean_html = doc.summary()
+
+                        # Convert to markdown
+                        markdown_content = md(
+                            clean_html, heading_style="ATX", strip=["script", "style"]
+                        )
+
+                        # Add title if available
+                        if title:
+                            markdown_content = f"# {title}\n\n{markdown_content}"
+
+                        # Clean up multiple line breaks
+                        markdown_content = re.sub(r"\n{3,}", "\n\n", markdown_content)
+
+                        # Truncate if too long
+                        if len(markdown_content) > self.max_content_length:
+                            truncated_content = markdown_content[: self.max_content_length - 100]
+                            markdown_content = truncated_content + "\n\n..._Content truncated_..."
+                            logger.warning(
+                                f"{url} truncated from {len(markdown_content)} to {len(truncated_content)}"
+                            )
+
+                        return f"## Content from {url}\n\n{markdown_content}"
+
+                    except ImportError as e:
+                        logger.error(f"Missing dependencies for local webpage visitor: {e}")
+                        return f"Error: Local webpage visitor requires readability-lxml and markdownify. Please install dependencies."
+                    except Exception as e:
+                        logger.error(f"Error extracting content from {url}: {e}")
+                        return f"Error extracting content: {e}"
+
+            except aiohttp.ClientError as e:
+                logger.error(f"Error fetching {url}: {e}")
+                return f"Error fetching URL: {e}"
+
+
 class WebpageVisitorExecutor:
-    """Async webpage visitor and content extractor."""
+    """Async webpage visitor and content extractor using Jina.ai service."""
 
     def __init__(
         self,
@@ -955,6 +1068,22 @@ def create_tool_executors(
             )
         search_executor = WebSearchExecutor(backend=search_provider)
 
+    # Webpage visitor config
+    webpage_visitor_type = tools_config.get("webpage_visitor", "jina")
+    user_agent = tools_config.get("user_agent")
+
+    if webpage_visitor_type == "local":
+        webpage_visitor = LocalWebpageVisitor(
+            progress_callback=progress_callback, user_agent=user_agent
+        )
+        logger.info("Using local webpage visitor (no external API calls)")
+    else:
+        # Default to Jina
+        webpage_visitor = WebpageVisitorExecutor(
+            progress_callback=progress_callback, api_key=jina_api_key
+        )
+        logger.info("Using Jina.ai webpage visitor")
+
     # Progress executor settings
     behavior = (config or {}).get("behavior", {})
     progress_cfg = behavior.get("progress", {}) if behavior else {}
@@ -962,9 +1091,7 @@ def create_tool_executors(
 
     executors = {
         "web_search": search_executor,
-        "visit_webpage": WebpageVisitorExecutor(
-            progress_callback=progress_callback, api_key=jina_api_key
-        ),
+        "visit_webpage": webpage_visitor,
         "execute_python": PythonExecutorE2B(api_key=e2b_api_key),
         "progress_report": ProgressReportExecutor(
             send_callback=progress_callback, min_interval_seconds=min_interval
