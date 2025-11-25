@@ -105,13 +105,20 @@ class MatrixMonitor:
         Returns:
             True if message is addressed to bot
         """
-        # Check for Matrix mention (e.g., "@botname:matrix.org")
+        logger.debug(f"Checking if message is addressed to bot. Message: '{message}'")
+        logger.debug(f"Bot user ID: {self.bot_user_id}")
+
+        # Check for Matrix mention (e.g., "@llm-assitant:matrix.org")
         if self.bot_user_id in message:
+            logger.debug("Bot user ID found in message!")
             return True
 
-        # Check for display name mention
-        # TODO: Cache display name to avoid repeated lookups
-        # For now, simple check
+        # Check for display name mention (e.g., "llm-assistant")
+        if "llm-assistant" in message.lower() or "llm-assitant" in message.lower():
+            logger.debug("Bot display name found in message!")
+            return True
+
+        logger.debug("Message not addressed to bot")
         return False
 
     async def handle_command(self, room_id: str, sender: str, message: str) -> None:
@@ -123,7 +130,7 @@ class MatrixMonitor:
             message: Message text
         """
         # Rate limiting
-        if not self.rate_limiter.check_rate_limit(sender):
+        if not self.rate_limiter.check_limit():
             logger.info(f"Rate limit exceeded for {sender}")
             await self.client.send_message(
                 room_id,

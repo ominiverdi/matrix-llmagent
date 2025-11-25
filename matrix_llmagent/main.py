@@ -103,6 +103,7 @@ class MatrixLLMAgent:
             prepended_context=prepended_context,
             agent=self,
             vision_model=mode_cfg.get("vision_model"),
+            allowed_tools=mode_cfg.get("allowed_tools"),
             **actor_kwargs,
         )
         response = await actor.run_agent(
