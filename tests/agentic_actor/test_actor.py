@@ -16,15 +16,15 @@ class TestAPIAgent:
     def agent(self, test_config, mock_agent):
         """Create agent instance for testing."""
         # Update serious prompt for agent tests (config structure already has the prompt)
-        test_config["rooms"]["irc"]["command"]["modes"]["serious"]["prompt"] = (
-            "You are IRC user {mynick}. Be helpful and informative. Available models: serious={serious_model}, sarcastic={sarcastic_model}."
+        test_config["matrix"]["command"]["modes"]["serious"]["system_prompt"] = (
+            "You are {mynick}. Be helpful and informative. Available models: serious={serious_model}, sarcastic={sarcastic_model}."
         )
 
         def build_test_prompt():
             from datetime import datetime
 
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-            return test_config["rooms"]["irc"]["command"]["modes"]["serious"]["prompt"].format(
+            return test_config["matrix"]["command"]["modes"]["serious"]["system_prompt"].format(
                 mynick="testbot",
                 current_time=current_time,
                 sarcastic_model="anthropic:claude-3-5-haiku",
@@ -33,7 +33,7 @@ class TestAPIAgent:
             )
 
         def get_prompt_reminder():
-            return test_config["rooms"]["irc"]["command"]["modes"]["serious"].get("prompt_reminder")
+            return test_config["matrix"]["command"]["modes"]["serious"].get("prompt_reminder")
 
         return AgenticLLMActor(
             config=test_config,
@@ -93,7 +93,7 @@ class TestAPIAgent:
         """Test agent initialization."""
         system_prompt = agent.system_prompt_generator()
         assert "testbot" in system_prompt  # mynick is substituted
-        assert "IRC user" in system_prompt
+        assert "helpful" in system_prompt.lower()  # Check for helpful behavior
         assert (
             "serious=" in system_prompt and "claude-3-5-sonnet" in system_prompt
         )  # serious model is substituted
@@ -111,9 +111,7 @@ class TestAPIAgent:
         mock_response = self.create_text_response(api_type, "This is a simple answer.")
 
         # Add prompt reminder to test config and capture messages
-        agent.config["rooms"]["irc"]["command"]["modes"]["serious"]["prompt_reminder"] = (
-            "Be helpful!"
-        )
+        agent.config["matrix"]["command"]["modes"]["serious"]["prompt_reminder"] = "Be helpful!"
         captured_messages = []
 
         class FakeClient:
@@ -570,9 +568,7 @@ class TestAPIAgent:
     async def test_vision_fallback_switches_model_and_appends_suffix(self, test_config, mock_agent):
         """Image via visit_webpage triggers switching to vision_model and suffix in final text."""
         # Minimal prompt wiring
-        test_config["rooms"]["irc"]["command"]["modes"]["serious"]["prompt"] = (
-            "You are IRC user {mynick}."
-        )
+        test_config["matrix"]["command"]["modes"]["serious"]["system_prompt"] = "You are {mynick}."
 
         # Build actor with openrouter base and anthropic vision
         from matrix_llmagent.agentic_actor import AgenticLLMActor
@@ -636,9 +632,9 @@ class TestAPIAgent:
         actor = AgenticLLMActor(
             config=test_config,
             model="openrouter:gpt-4o-mini",
-            system_prompt_generator=lambda: test_config["rooms"]["irc"]["command"]["modes"][
-                "serious"
-            ]["prompt"].format(
+            system_prompt_generator=lambda: test_config["matrix"]["command"]["modes"]["serious"][
+                "system_prompt"
+            ].format(
                 mynick="testbot",
                 current_time="now",
                 sarcastic_model="s",

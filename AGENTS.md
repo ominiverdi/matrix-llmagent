@@ -13,22 +13,21 @@
 - **Main Service**: `matrix_llmagent/main.py` - Core application coordinator managing shared resources (config, history, model router)
 - **Room Isolation**: Platform-specific functionality isolated in `rooms/` directory
 - **Modular Structure**: Clean separation between platform-agnostic core and platform-specific implementation
-- **Note**: Currently in migration from IRC (varlink) to Matrix (matrix-nio)
-- **APIs**: Anthropic Claude (sarcastic/serious modes with automatic classification using claude-3-5-haiku), Perplexity AI, E2B sandbox for Python code execution
+- **Matrix Protocol**: Native Matrix support using matrix-nio client library
+- **APIs**: Anthropic Claude (sarcastic/serious modes with automatic classification using claude-3-5-haiku), Perplexity AI, E2B sandbox for Python code execution, llama.cpp for local models
 - **Config**: JSON-based configuration in `config.json` (copy from `config.json.example`)
-  - Models MUST be fully-qualified as `provider:model` (e.g., `anthropic:claude-sonnet-4`). No defaults.
+  - Models MUST be fully-qualified as `provider:model` (e.g., `anthropic:claude-sonnet-4`, `llamacpp:llama-3.1-8b`). No defaults.
   - No backwards compatibility is kept for legacy config keys; tests are aligned to the new schema.
 - **Logging**: Console output (INFO+) and debug.log file (DEBUG+), third-party libraries suppressed from console
 - **Database**: SQLite persistent chat history with configurable inference limits
 - **Continuous Chronicling**: Automatic chronicling triggered when unchronicled messages exceed `history_size` threshold. Uses `chronicler.model` to summarize conversation activity into Chronicle chapters. Messages get linked via `chapter_id` field in ChatHistory. Includes safety limits (100 message batches, 7-day lookback) and overlap for context continuity
-- **Proactive Interjecting**: Channel-based whitelist feature using claude-3-haiku to scan non-directed messages and interject in serious conversations when useful. Includes rate limiting, test mode, and channel whitelisting
+- **Proactive Interjecting**: Room-based whitelist feature using claude-3-haiku to scan non-directed messages and interject in serious conversations when useful. Includes rate limiting, test mode, and room whitelisting
 - **Key Modules**:
-  - `rooms/irc/monitor.py` - IRCRoomMonitor (IRC message processing - to be replaced with Matrix)
-  - `rooms/irc/varlink.py` - VarlinkClient (IRC protocol - to be replaced with Matrix)
-  - `rooms/irc/autochronicler.py` - AutoChronicler (automatic chronicling - to be adapted for Matrix)
+  - `matrix_client.py` - MatrixClient (Matrix protocol client using matrix-nio)
+  - `matrix_monitor.py` - MatrixMonitor (Matrix room monitoring and message processing)
   - `rooms/proactive.py` - ProactiveDebouncer (proactive interjecting - platform-agnostic)
   - `history.py` - ChatHistory (persistent SQLite storage)
-  - `providers/` - async API clients (anthropic, openai, perplexity) and base classes
+  - `providers/` - async API clients (anthropic, openai, perplexity, llamacpp) and base classes
   - `rate_limiter.py` - RateLimiter
   - `agentic_actor/` - AgenticLLMActor multi-turn mode with tool system for web search, webpage visiting, and Python code execution
 

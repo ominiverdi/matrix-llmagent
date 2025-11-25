@@ -57,14 +57,9 @@ class MatrixLLMAgent:
 
         # TODO: Update for Matrix config structure
         # For now, use legacy config structure for compatibility
-        try:
-            # Try Matrix config first
-            room_config = self.config.get("matrix", {}).get("command", {})
-            history_size = room_config.get("history_size", 30)
-        except (KeyError, TypeError):
-            # Fallback to IRC config for backward compatibility during migration
-            room_config = self.config.get("rooms", {}).get("irc", {}).get("command", {})
-            history_size = room_config.get("history_size", 30)
+        # Get Matrix config
+        room_config = self.config.get("matrix", {}).get("command", {})
+        history_size = room_config.get("history_size", 30)
 
         self.history = ChatHistory(
             self.config.get("history", {}).get("database", {}).get("path", "chat_history.db"),
@@ -115,7 +110,7 @@ class MatrixLLMAgent:
         if not response or response.strip().upper() == "NULL":
             return None
         cleaned = response.strip()
-        # Strip IRC-style leading prefixes from context-echoed outputs: timestamps and non-quest tags like <nick>.
+        # Strip leading prefixes from context-echoed outputs: timestamps and non-quest tags like <nick>.
         # Never strip <quest> or <quest_finished> because those carry semantics for the chronicler.
         cleaned = re.sub(
             r"^(?:\s*(?:\[?\d{1,2}:\d{2}\]?\s*)?(?:<(?!/?quest(?:_finished)?\b)[^>]+>))*\s*",

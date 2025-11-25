@@ -82,25 +82,25 @@ async def test_progress_report_tool_emits_callback(monkeypatch, mock_agent):
         "default_provider": "anthropic",
         "providers": {"anthropic": {"url": "http://example.com", "key": "dummy"}},
         "tools": {},
-        "rooms": {
-            "irc": {
-                "command": {
-                    "modes": {
-                        "serious": {
-                            "model": "anthropic:dummy-serious",
-                            "prompt": "{mynick} at {current_time} with models serious={serious_model}, sarcastic={sarcastic_model}",
-                        },
-                        "sarcastic": {
-                            "model": "anthropic:dummy-sarcastic",
-                            "prompt": "Sarcastic prompt",
-                        },
+        "matrix": {
+            "homeserver": "https://matrix.org",
+            "user_id": "@testbot:matrix.org",
+            "command": {
+                "modes": {
+                    "serious": {
+                        "model": "anthropic:dummy-serious",
+                        "system_prompt": "{mynick} at {current_time} with models serious={serious_model}, sarcastic={sarcastic_model}",
                     },
-                    "mode_classifier": {
-                        "model": "anthropic:dummy-classifier",
-                        "prompt": "Classifier prompt",
+                    "sarcastic": {
+                        "model": "anthropic:dummy-sarcastic",
+                        "system_prompt": "Sarcastic prompt",
                     },
-                }
-            }
+                },
+                "mode_classifier": {
+                    "model": "anthropic:dummy-classifier",
+                    "system_prompt": "Classifier prompt",
+                },
+            },
         },
         "actor": {
             "max_iterations": 5,
@@ -174,17 +174,17 @@ async def test_progress_callback_with_tool_persistence_type(mock_agent):
         "default_provider": "anthropic",
         "providers": {"anthropic": {"url": "http://example.com", "key": "dummy"}},
         "tools": {},
-        "rooms": {
-            "irc": {
-                "command": {
-                    "modes": {
-                        "serious": {
-                            "model": "anthropic:dummy-serious",
-                            "prompt": "Test prompt",
-                        }
+        "matrix": {
+            "homeserver": "https://matrix.org",
+            "user_id": "@testbot:matrix.org",
+            "command": {
+                "modes": {
+                    "serious": {
+                        "model": "anthropic:dummy-serious",
+                        "system_prompt": "Test prompt",
                     }
                 }
-            }
+            },
         },
         "actor": {
             "max_iterations": 5,

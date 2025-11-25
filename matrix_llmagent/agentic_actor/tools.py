@@ -27,7 +27,7 @@ async def fetch_image_b64(
     async with session.head(
         url,
         timeout=aiohttp.ClientTimeout(total=timeout),
-        headers={"User-Agent": "irssi-llmagent/1.0"},
+        headers={"User-Agent": "matrix-llmagent/1.0"},
     ) as head_response:
         content_type = head_response.headers.get("content-type", "").lower()
         if not content_type.startswith("image/"):
@@ -36,7 +36,7 @@ async def fetch_image_b64(
     async with session.get(
         url,
         timeout=aiohttp.ClientTimeout(total=timeout),
-        headers={"User-Agent": "irssi-llmagent/1.0"},
+        headers={"User-Agent": "matrix-llmagent/1.0"},
         max_line_size=8190 * 2,
         max_field_size=8190 * 2,
     ) as response:
@@ -336,7 +336,7 @@ class JinaSearchExecutor:
 
         url = "https://s.jina.ai/?q=" + query
         headers = {
-            "User-Agent": "irssi-llmagent/1.0",
+            "User-Agent": "matrix-llmagent/1.0",
             "X-Respond-With": "no-content",
             "Accept": "text/plain",
         }
@@ -395,7 +395,7 @@ class WebpageVisitorExecutor:
             async with session.head(
                 url,
                 timeout=aiohttp.ClientTimeout(total=self.timeout),
-                headers={"User-Agent": "irssi-llmagent/1.0"},
+                headers={"User-Agent": "matrix-llmagent/1.0"},
             ) as head_response:
                 content_type = head_response.headers.get("content-type", "").lower()
 
@@ -447,7 +447,7 @@ class WebpageVisitorExecutor:
                 await asyncio.sleep(delay)
 
             try:
-                headers = {"User-Agent": "irssi-llmagent/1.0"}
+                headers = {"User-Agent": "matrix-llmagent/1.0"}
                 if self.api_key:
                     headers["Authorization"] = f"Bearer {self.api_key}"
                 async with session.get(

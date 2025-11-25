@@ -118,7 +118,7 @@ class BaseAnthropicAPIClient(BaseAPIClient):
                             "x-api-key": self.config["key"],
                             "anthropic-version": "2023-06-01",
                             "Content-Type": "application/json",
-                            "User-Agent": "irssi-llmagent/1.0",
+                            "User-Agent": "matrix-llmagent/1.0",
                         }
                     ) as session,
                     session.post(self.config["url"], json=payload) as response,

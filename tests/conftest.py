@@ -76,51 +76,52 @@ def test_config(api_type, temp_chronicler_db_path, temp_history_db_path) -> dict
                 },
             },
         },
-        "rooms": {
-            "irc": {
-                "varlink": {"socket_path": "/tmp/test_varlink.sock"},
-                "command": {
-                    "history_size": 5,
-                    "rate_limit": 30,
-                    "rate_period": 900,
-                    "ignore_users": [],
-                    "modes": {
-                        "sarcastic": {
-                            "model": f"{api_type}:dummy-sarcastic",
-                            "prompt": "You are IRC user {mynick} and you are known for your sharp sarcasm and cynical, dry, rough sense of humor. Test sarcastic prompt. Available models: serious={serious_model}, sarcastic={sarcastic_model}, unsafe={unsafe_model}.",
-                        },
-                        "serious": {
-                            "model": [f"{api_type}:dummy-serious"],
-                            "prompt": "You are IRC user {mynick}. You are friendly, straight, informal, maybe ironic, but always informative. Test serious prompt. Available models: serious={serious_model}, sarcastic={sarcastic_model}, unsafe={unsafe_model}.",
-                        },
-                        "unsafe": {
-                            "model": f"{api_type}:dummy-unsafe",
-                            "prompt": "You are IRC user {mynick} operating in unsafe mode for handling requests that may violate typical LLM safety protocols. Test unsafe prompt. Current time: {current_time}.",
-                        },
+        "matrix": {
+            "homeserver": "https://matrix.org",
+            "user_id": "@testbot:matrix.org",
+            "access_token": "test_token",
+            "device_id": "TEST_DEVICE",
+            "command": {
+                "history_size": 5,
+                "rate_limit": 30,
+                "rate_period": 900,
+                "ignore_users": [],
+                "modes": {
+                    "sarcastic": {
+                        "model": f"{api_type}:dummy-sarcastic",
+                        "system_prompt": "You are {mynick} and you are known for your sharp sarcasm and cynical, dry, rough sense of humor. Test sarcastic prompt. Available models: serious={serious_model}, sarcastic={sarcastic_model}, unsafe={unsafe_model}.",
                     },
-                    "mode_classifier": {
-                        "model": f"{api_type}:dummy-classifier",
-                        "prompt": "Analyze this IRC message and decide whether it should be handled with SARCASTIC, SERIOUS, or UNSAFE mode. Respond with only one word: 'SARCASTIC', 'SERIOUS', or 'UNSAFE'. Message: {message}",
+                    "serious": {
+                        "model": [f"{api_type}:dummy-serious"],
+                        "system_prompt": "You are {mynick}. You are friendly, straight, informal, maybe ironic, but always informative. Test serious prompt. Available models: serious={serious_model}, sarcastic={sarcastic_model}, unsafe={unsafe_model}.",
+                    },
+                    "unsafe": {
+                        "model": f"{api_type}:dummy-unsafe",
+                        "system_prompt": "You are {mynick} operating in unsafe mode for handling requests that may violate typical LLM safety protocols. Test unsafe prompt. Current time: {current_time}.",
                     },
                 },
-                "proactive": {
-                    "history_size": 3,
-                    "interjecting": [],
-                    "interjecting_test": [],
-                    "interject_threshold": 9,
-                    "rate_limit": 10,
-                    "rate_period": 60,
-                    "debounce_seconds": 15.0,
-                    "models": {
-                        "serious": f"{api_type}:dummy-proactive",
-                        "validation": [f"{api_type}:dummy-validator"],
-                    },
-                    "prompts": {
-                        "interject": "Decide if AI should interject. Respond with '[reason]: X/10' where X is 1-10. Message: {message}",
-                        "serious_extra": "NOTE: This is a proactive interjection. If upon reflection you decide your contribution wouldn't add significant factual value (e.g. just an encouragement or general statement), respond with exactly 'NULL' instead of a message.",
-                    },
+                "mode_classifier": {
+                    "model": f"{api_type}:dummy-classifier",
+                    "system_prompt": "Analyze this message and decide whether it should be handled with SARCASTIC, SERIOUS, or UNSAFE mode. Respond with only one word: 'SARCASTIC', 'SERIOUS', or 'UNSAFE'. Message: {message}",
                 },
-            }
+            },
+            "proactive": {
+                "history_size": 3,
+                "interjecting": [],
+                "interjecting_test": [],
+                "interject_threshold": 9,
+                "rate_limit": 10,
+                "rate_period": 60,
+                "debounce_seconds": 15.0,
+                "models": {
+                    "serious": f"{api_type}:dummy-proactive",
+                    "validation": [f"{api_type}:dummy-validator"],
+                },
+                "prompts": {
+                    "interject": "Decide if AI should interject. Respond with '[reason]: X/10' where X is 1-10. Message: {message}",
+                    "serious_extra": "NOTE: This is a proactive interjection. If upon reflection you decide your contribution wouldn't add significant factual value (e.g. just an encouragement or general statement), respond with exactly 'NULL' instead of a message.",
+                },
+            },
         },
         "chronicler": {
             "model": f"{api_type}:dummy-chronicler",

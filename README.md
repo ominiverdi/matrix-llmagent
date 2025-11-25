@@ -156,11 +156,11 @@ Evaluate the performance of the automatic mode classifier on historical data:
 # Analyze classifier performance on database history
 uv run python analyze_classifier.py --db chat_history.db
 
-# Analyze classifier performance on IRC log files
-uv run python analyze_classifier.py --logs ~/.irssi/logs/freenode/*.log
+# Analyze classifier performance on chat log files
+uv run python analyze_classifier.py --logs ~/logs/*.log
 
 # Combine both sources with custom config
-uv run python analyze_classifier.py --db chat_history.db --logs ~/.irssi/logs/ --config config.json
+uv run python analyze_classifier.py --db chat_history.db --logs ~/logs/ --config config.json
 ```
 
 Results are saved to `classifier_analysis.csv` with detailed metrics and misclassification analysis.
@@ -173,11 +173,11 @@ Evaluate the performance of the proactive interjecting feature on historical dat
 # Analyze proactive interjecting performance on database history
 uv run python analyze_proactive.py --limit 20
 
-# Analyze proactive interjecting on IRC log files with channel exclusions
-uv run python analyze_proactive.py --logs ~/.irssi/logs/ --limit 50 --exclude-news
+# Analyze proactive interjecting on chat log files with channel exclusions
+uv run python analyze_proactive.py --logs ~/logs/ --limit 50 --exclude-news
 
 # Combine both sources with custom config
-uv run python analyze_proactive.py --db chat_history.db --logs ~/.irssi/logs/ --config config.json
+uv run python analyze_proactive.py --db chat_history.db --logs ~/logs/ --config config.json
 ```
 
 Results are saved to `proactive_analysis.csv` with detailed interjection decisions and reasoning.

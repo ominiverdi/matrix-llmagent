@@ -37,9 +37,9 @@ class TestMatrixLLMAgent:
         agent = MatrixLLMAgent(temp_config_file)
         assert agent.config is not None
         assert "providers" in agent.config  # Provider sections exist
-        assert "rooms" in agent.config
-        assert "irc" in agent.config["rooms"]
-        assert "varlink" in agent.config["rooms"]["irc"]
+        assert "matrix" in agent.config
+        assert "homeserver" in agent.config["matrix"]
+        assert "command" in agent.config["matrix"]
 
 
 @pytest.mark.skip(reason="CLI mode disabled until Matrix monitor is implemented (Phase 4)")
@@ -84,8 +84,7 @@ class TestCLIMode:
                         # Verify output
                         print_calls = [call[0][0] for call in mock_print.call_args_list]
                         assert any(
-                            "Simulating IRC message: !S tell me a joke" in call
-                            for call in print_calls
+                            "Simulating message: !S tell me a joke" in call for call in print_calls
                         )
                         assert any("Sarcastic response" in call for call in print_calls)
 
@@ -135,7 +134,7 @@ class TestCLIMode:
                         # Verify output
                         print_calls = [call[0][0] for call in mock_print.call_args_list]
                         assert any(
-                            "Simulating IRC message: !p what is the weather?" in call
+                            "Simulating message: !p what is the weather?" in call
                             for call in print_calls
                         )
                         assert any("Weather is sunny" in call for call in print_calls)
@@ -183,7 +182,7 @@ class TestCLIMode:
                         # Verify output
                         print_calls = [call[0][0] for call in mock_print.call_args_list]
                         assert any(
-                            "Simulating IRC message: !s search for Python news" in call
+                            "Simulating message: !s search for Python news" in call
                             for call in print_calls
                         )
                         assert any("Agent response" in call for call in print_calls)
