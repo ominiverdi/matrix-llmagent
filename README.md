@@ -235,6 +235,9 @@ Search the web and get top results with titles, URLs, and descriptions.
 }
 ```
 
+**Disable web search entirely:**
+Remove `search_provider` from config or set it to `""`, `"none"`, or `"disabled"`. The `web_search` tool will not be offered to the agent.
+
 ### 📄 Web Crawler (`visit_webpage`)
 Visit and analyze any webpage, converting HTML to clean Markdown.
 
@@ -420,6 +423,26 @@ Bot: [Searches knowledge_base for "strk"]
 - **`make_plan`** - Formulate research/execution strategy before acting
 - **`final_answer`** - Structured final response with thinking process
 - **Chronicle tools** - Access conversation history and memory
+
+### 📏 Collapsible Long Messages
+
+Long bot responses are automatically wrapped in a collapsible `<details>` tag for Matrix clients that support HTML rendering. This keeps chat rooms tidy while preserving full content.
+
+**Behavior:**
+- Messages exceeding `max_message_length` (default: 300 characters) are collapsed
+- The preview shows the first ~30 words with "..." 
+- Users can expand to see the full response
+
+**Configuration:**
+```json
+{
+  "behavior": {
+    "max_message_length": 300
+  }
+}
+```
+
+Set to a very high value (e.g., `999999`) to effectively disable collapsing.
 
 ### 🔧 Tool Configuration
 
