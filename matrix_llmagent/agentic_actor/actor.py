@@ -144,10 +144,15 @@ class AgenticLLMActor:
                         ]
 
                 # Fill in {config.path} placeholders in tool descriptions
+                # Only include tools that have executors configured
                 import re
 
                 available_tools = []
                 for tool in TOOLS + self.additional_tools:
+                    # Skip tools that don't have executors
+                    if tool["name"] not in tool_executors:
+                        continue
+
                     tool_copy = copy.deepcopy(tool)
                     desc = tool_copy.get("description", "")
 
@@ -393,7 +398,7 @@ class AgenticLLMActor:
                 persistent_tool_calls, progress_callback
             )
 
-        raise StopIteration("Agent took too many turns to research")
+        raise RuntimeError("Agent took too many turns to research")
 
     def _process_ai_response_provider(
         self, response: dict | str | None, client: Any

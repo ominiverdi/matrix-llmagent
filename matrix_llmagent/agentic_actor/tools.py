@@ -204,6 +204,25 @@ TOOLS: list[Tool] = [
 TOOLS.extend(chronicle_tools_defs())  # type: ignore
 
 
+def knowledge_base_tool_def(name: str, description: str) -> Tool:
+    """Generate knowledge_base tool definition with configured name and description."""
+    return {
+        "name": "knowledge_base",
+        "description": description,
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": f"Search query for {name}. Can be keywords, names, or natural language.",
+                }
+            },
+            "required": ["query"],
+        },
+        "persist": "summary",
+    }
+
+
 class RateLimiter:
     """Simple rate limiter for tool calls."""
 
@@ -1025,6 +1044,143 @@ class ImageGenExecutor:
         return content_blocks
 
 
+class KnowledgeBaseSearchExecutor:
+    """Search a PostgreSQL knowledge base with semantic extractions.
+
+    Expected schema:
+    - page_extensions: page_title, resume, keywords, url (with tsvector indexes)
+    - entities: entity_name, entity_type, url (optional)
+    - entity_relationships: subject_id, predicate, object_id
+    """
+
+    def __init__(
+        self,
+        database_url: str,
+        name: str = "Knowledge Base",
+        max_results: int = 5,
+        max_entities: int = 10,
+    ):
+        self.database_url = database_url
+        self.name = name
+        self.max_results = max_results
+        self.max_entities = max_entities
+        self._pool: Any | None = None
+
+    async def _get_pool(self):
+        """Get or create connection pool."""
+        if self._pool is None:
+            import asyncpg
+
+            self._pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=5)
+        return self._pool
+
+    async def execute(self, query: str) -> str:
+        """Search the knowledge base and return formatted results."""
+        try:
+            pool = await self._get_pool()
+        except Exception as e:
+            logger.error(f"Failed to connect to knowledge base: {e}")
+            return f"Error: Failed to connect to {self.name}: {e}"
+
+        results_parts = []
+        pages = []
+        entities = []
+
+        async with pool.acquire() as conn:  # type: ignore[union-attr]
+            # 1. Full-text search on page_extensions
+            pages = await conn.fetch(
+                """
+                SELECT page_title, url, resume, keywords,
+                       ts_rank(resume_tsv, websearch_to_tsquery('english', $1)) +
+                       ts_rank(keywords_tsv, websearch_to_tsquery('english', $1)) * 2 +
+                       ts_rank(page_title_tsv, websearch_to_tsquery('english', $1)) * 3 AS rank
+                FROM page_extensions
+                WHERE resume_tsv @@ websearch_to_tsquery('english', $1)
+                   OR keywords_tsv @@ websearch_to_tsquery('english', $1)
+                   OR page_title_tsv @@ websearch_to_tsquery('english', $1)
+                ORDER BY rank DESC
+                LIMIT $2
+                """,
+                query,
+                self.max_results,
+            )
+
+            if pages:
+                results_parts.append(f"## Pages from {self.name}\n")
+                for page in pages:
+                    title = page["page_title"]
+                    url = page["url"]
+                    resume = page["resume"]
+                    # Truncate resume for display
+                    if len(resume) > 300:
+                        resume = resume[:300] + "..."
+                    results_parts.append(f"### [{title}]({url})\n{resume}\n")
+
+            # 2. Entity search using trigram similarity
+            entities = await conn.fetch(
+                """
+                SELECT entity_name, entity_type, url,
+                       similarity(entity_name, $1) AS sim
+                FROM entities
+                WHERE entity_name % $1
+                   OR entity_name ILIKE '%' || $1 || '%'
+                ORDER BY sim DESC, entity_name
+                LIMIT $2
+                """,
+                query,
+                self.max_entities,
+            )
+
+            if entities:
+                results_parts.append("\n## Entities\n")
+                for ent in entities:
+                    ent_name = ent["entity_name"]
+                    ent_type = ent["entity_type"]
+                    ent_url = ent["url"]
+                    if ent_url:
+                        results_parts.append(
+                            f"- **{ent_name}** ({ent_type}) - [{ent_url}]({ent_url})"
+                        )
+                    else:
+                        results_parts.append(f"- **{ent_name}** ({ent_type})")
+
+            # 3. Get relationships for matched entities
+            if entities:
+                entity_names = [e["entity_name"] for e in entities[:5]]
+                relationships = await conn.fetch(
+                    """
+                    SELECT s.entity_name AS subject, r.predicate, o.entity_name AS object
+                    FROM entity_relationships r
+                    JOIN entities s ON r.subject_id = s.id
+                    JOIN entities o ON r.object_id = o.id
+                    WHERE s.entity_name = ANY($1) OR o.entity_name = ANY($1)
+                    LIMIT 15
+                    """,
+                    entity_names,
+                )
+
+                if relationships:
+                    results_parts.append("\n## Relationships\n")
+                    for rel in relationships:
+                        results_parts.append(
+                            f"- {rel['subject']} **{rel['predicate']}** {rel['object']}"
+                        )
+
+        if not results_parts:
+            return f"No results found in {self.name} for: {query}"
+
+        logger.info(
+            f"Knowledge base search '{query}': {len(pages)} pages, {len(entities)} entities"
+        )
+        return "\n".join(results_parts)
+
+    async def cleanup(self):
+        """Close the connection pool."""
+        if self._pool:
+            await self._pool.close()
+            self._pool = None
+
+
 def create_tool_executors(
     config: dict | None = None,
     *,
@@ -1050,23 +1206,28 @@ def create_tool_executors(
     search_provider = tools_config.get("search_provider", "auto")
 
     # Create appropriate search executor based on provider
-    if search_provider == "jina":
-        search_executor = JinaSearchExecutor(api_key=jina_api_key)
-    elif search_provider == "brave":
-        brave_config = tools.get("brave", {})
-        brave_api_key = brave_config.get("api_key")
-        if not brave_api_key:
-            logger.warning("Brave search configured but no API key found, falling back to ddgs")
-            search_executor = WebSearchExecutor(backend="brave")
+    # Set to None if disabled (empty string, "none", or "disabled")
+    search_executor = None
+    if search_provider and search_provider.lower() not in ("none", "disabled", "off", "false"):
+        if search_provider == "jina":
+            search_executor = JinaSearchExecutor(api_key=jina_api_key)
+        elif search_provider == "brave":
+            brave_config = tools.get("brave", {})
+            brave_api_key = brave_config.get("api_key")
+            if not brave_api_key:
+                logger.warning("Brave search configured but no API key found, falling back to ddgs")
+                search_executor = WebSearchExecutor(backend="brave")
+            else:
+                search_executor = BraveSearchExecutor(api_key=brave_api_key)
         else:
-            search_executor = BraveSearchExecutor(api_key=brave_api_key)
+            if "jina" in search_provider:
+                raise ValueError(
+                    f"Jina search provider must be exclusive. Found: '{search_provider}'. "
+                    "Use exactly 'jina' for jina search (recommended provider, but API key required)."
+                )
+            search_executor = WebSearchExecutor(backend=search_provider)
     else:
-        if "jina" in search_provider:
-            raise ValueError(
-                f"Jina search provider must be exclusive. Found: '{search_provider}'. "
-                "Use exactly 'jina' for jina search (recommended provider, but API key required)."
-            )
-        search_executor = WebSearchExecutor(backend=search_provider)
+        logger.info("Web search disabled (search_provider not configured or set to disabled)")
 
     # Webpage visitor config
     webpage_visitor_type = tools_config.get("webpage_visitor", "local")
@@ -1090,9 +1251,7 @@ def create_tool_executors(
     min_interval = int(progress_cfg.get("min_interval_seconds", 15))
 
     executors = {
-        "web_search": search_executor,
         "visit_webpage": webpage_visitor,
-        "execute_python": PythonExecutorE2B(api_key=e2b_api_key),
         "progress_report": ProgressReportExecutor(
             send_callback=progress_callback, min_interval_seconds=min_interval
         ),
@@ -1103,9 +1262,31 @@ def create_tool_executors(
         "chronicle_read": ChapterRenderExecutor(chronicle=agent.chronicle, arc=arc),
     }
 
-    # Add generate_image only if router is available
-    if router:
+    # Add web_search only if a search provider is configured
+    if search_executor:
+        executors["web_search"] = search_executor
+        logger.info(f"Web search enabled (provider: {search_provider})")
+
+    # Add execute_python only if E2B API key is configured
+    if e2b_api_key:
+        executors["execute_python"] = PythonExecutorE2B(api_key=e2b_api_key)
+        logger.info("Python execution enabled (E2B sandbox)")
+
+    # Add generate_image only if router is available and openrouter is configured
+    openrouter_config = (config or {}).get("providers", {}).get("openrouter", {})
+    if router and openrouter_config.get("key"):
         executors["generate_image"] = ImageGenExecutor.from_config(config or {}, router)
+
+    # Add knowledge_base if configured
+    kb_config = tools.get("knowledge_base", {})
+    if kb_config.get("enabled") and kb_config.get("database_url"):
+        executors["knowledge_base"] = KnowledgeBaseSearchExecutor(
+            database_url=kb_config["database_url"],
+            name=kb_config.get("name", "Knowledge Base"),
+            max_results=kb_config.get("max_results", 5),
+            max_entities=kb_config.get("max_entities", 10),
+        )
+        logger.info(f"Knowledge base search enabled: {kb_config.get('name', 'Knowledge Base')}")
 
     return executors
 

@@ -515,7 +515,9 @@ class TestToolRegistry:
         with patch.object(PythonExecutorE2B, "execute", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = "Code output"
 
-            tool_executors = create_tool_executors(agent=mock_agent, arc="test")
+            # Must provide E2B API key to enable execute_python
+            config = {"tools": {"e2b": {"api_key": "test-key"}}}
+            tool_executors = create_tool_executors(config, agent=mock_agent, arc="test")
             result = await execute_tool("execute_python", tool_executors, code="print('test')")
 
             assert result == "Code output"
@@ -569,10 +571,12 @@ class TestToolDefinitions:
         """Test that tool executors are created without configuration."""
         executors = create_tool_executors(agent=mock_agent, arc="test")
 
-        assert "execute_python" in executors
-        python_executor = executors["execute_python"]
-        assert isinstance(python_executor, PythonExecutorE2B)
-        assert python_executor.api_key is None
+        # execute_python should NOT be available without E2B API key
+        assert "execute_python" not in executors
+        # But basic tools should always be available
+        assert "web_search" in executors
+        assert "visit_webpage" in executors
+        assert "final_answer" in executors
 
     def test_make_plan_tool_in_tools_list(self):
         """Test that make_plan tool is included in TOOLS list."""

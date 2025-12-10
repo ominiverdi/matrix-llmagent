@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .agentic_actor import AgenticLLMActor
+from .agentic_actor.tools import knowledge_base_tool_def
 from .chronicler.chronicle import Chronicle
 from .chronicler.quests import QuestOperator
 from .history import ChatHistory
@@ -75,6 +76,18 @@ class MatrixLLMAgent:
 
         self.quests = QuestOperator(self)
 
+        # Build additional tools from config
+        self.additional_tools: list[dict[str, Any]] = []
+        kb_config = self.config.get("tools", {}).get("knowledge_base", {})
+        if kb_config.get("enabled") and kb_config.get("database_url"):
+            kb_name = kb_config.get("name", "Knowledge Base")
+            kb_description = kb_config.get(
+                "description",
+                f"Search {kb_name} for information about projects, people, organizations, and events.",
+            )
+            self.additional_tools.append(dict(knowledge_base_tool_def(kb_name, kb_description)))
+            logger.info(f"Knowledge base tool enabled: {kb_name}")
+
     async def run_actor(
         self,
         context: list[dict[str, str]],
@@ -99,6 +112,7 @@ class MatrixLLMAgent:
             agent=self,
             vision_model=mode_cfg.get("vision_model"),
             allowed_tools=mode_cfg.get("allowed_tools"),
+            additional_tools=self.additional_tools,
             **actor_kwargs,
         )
         response = await actor.run_agent(
@@ -153,6 +167,45 @@ class MatrixLLMAgent:
             # Chronicle doesn't need explicit cleanup
 
 
+def _print_cli_help(config: dict[str, Any]) -> None:
+    """Print CLI help message."""
+    tools_config = config.get("tools", {})
+    kb_config = tools_config.get("knowledge_base", {})
+    kb_name = kb_config.get("name", "Knowledge Base") if kb_config.get("enabled") else None
+
+    print("""
+Available Commands
+==================
+
+Modes:
+  !s <message>  - Serious mode (default) - thoughtful responses with web tools
+  !d <message>  - Sarcastic mode - witty, humorous responses
+  !a <message>  - Agent mode - multi-turn research with tool chaining
+  !p <message>  - Perplexity mode - web-enhanced AI responses
+  !u <message>  - Unsafe mode - uncensored responses
+  !h            - Show this help message
+
+Tools Available:
+  - Web search and webpage visiting
+  - Code execution (if configured)
+  - Image generation (if configured)""")
+
+    if kb_name:
+        print(f"  - {kb_name} search")
+
+    print("""
+Examples:
+  uv run matrix-llmagent --message "what is QGIS?"
+  uv run matrix-llmagent --message "!d tell me a GIS joke"
+  uv run matrix-llmagent --message "!a research FOSS4G 2024"
+
+Tips:
+  - Default mode is serious - no prefix needed for most questions
+  - Use !a for complex research that needs multiple steps
+  - Use !d when you want fun, sarcastic responses
+""")
+
+
 async def cli_message(message: str, config_path: str | None = None) -> None:
     """CLI mode for testing message handling including command parsing."""
     # Load configuration
@@ -163,20 +216,83 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         print("Please create config.json from config.json.example")
         sys.exit(1)
 
-    print(f"🤖 Simulating message: {message}")
-    print("=" * 60)
-    print("⚠️  CLI message simulation not yet implemented for Matrix.")
-    print("   See PLAN.md Phase 4 for Matrix monitor implementation status.")
-    print("=" * 60)
+    try:
+        agent = MatrixLLMAgent(str(config_file))
+        await agent.history.initialize()
+        await agent.chronicle.initialize()
 
-    # TODO: Implement CLI message handling once Matrix monitor is ready
-    # try:
-    #     agent = MatrixLLMAgent(str(config_file))
-    #     await agent.history.initialize()
-    #     await agent.chronicle.initialize()
-    #     # Simulate Matrix message handling
-    # finally:
-    #     await agent.history.close()
+        # Handle help command
+        if message.lower().strip() in ("!h", "!help", "help"):
+            _print_cli_help(agent.config)
+            return
+
+        # Parse mode from message prefix
+        mode = "serious"  # default
+        clean_message = message
+
+        if message.startswith("!s ") or message.startswith("!S "):
+            mode = "serious"
+            clean_message = message[3:]
+        elif message.startswith("!d ") or message.startswith("!D "):
+            mode = "sarcastic"
+            clean_message = message[3:]
+        elif message.startswith("!u ") or message.startswith("!U "):
+            mode = "unsafe"
+            clean_message = message[3:]
+        elif message.startswith("!a ") or message.startswith("!A "):
+            mode = "agent"
+            clean_message = message[3:]
+        elif message.startswith("!p ") or message.startswith("!P "):
+            mode = "perplexity"
+            clean_message = message[3:]
+
+        # Get mode configuration
+        command_config = agent.config.get("matrix", {}).get("command", {})
+        mode_cfg = command_config.get("modes", {}).get(mode, {})
+
+        if not mode_cfg:
+            print(f"Error: Mode '{mode}' not configured")
+            sys.exit(1)
+
+        if not mode_cfg.get("model"):
+            print(f"Error: No model configured for mode '{mode}'")
+            sys.exit(1)
+
+        print(f"Mode: {mode}")
+        print(f"Model: {mode_cfg.get('model')}")
+        print(f"Query: {clean_message}")
+        print("-" * 60)
+
+        # Build context (just the current message for CLI)
+        context = [{"role": "user", "content": clean_message}]
+
+        # Build system prompt
+        system_prompt = mode_cfg.get("system_prompt", "You are a helpful assistant.")
+        system_prompt = system_prompt.replace("{mynick}", "CLI-Bot")
+
+        # Run actor
+        response = await agent.run_actor(
+            context,
+            mode_cfg=mode_cfg,
+            system_prompt=system_prompt,
+            arc="cli#test",
+        )
+
+        print("-" * 60)
+        if response:
+            print(response)
+        else:
+            print("(No response)")
+
+    except Exception as e:
+        logger.error(f"CLI error: {e}")
+        print(f"Error: {e}")
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
+    finally:
+        await agent.history.close()
 
 
 async def cli_chronicler(arc: str, instructions: str, config_path: str | None = None) -> None:

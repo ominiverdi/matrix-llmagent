@@ -1,9 +1,8 @@
 """Matrix room monitor for handling messages and events."""
 
-import asyncio
+import html
 import logging
 import re
-from typing import Any
 
 from nio import MatrixRoom, RoomMessageText
 
@@ -12,6 +11,52 @@ from .rate_limiter import RateLimiter
 from .rooms import ProactiveDebouncer
 
 logger = logging.getLogger(__name__)
+
+# Default threshold for collapsible messages (in characters)
+DEFAULT_LONG_MESSAGE_THRESHOLD = 300
+DEFAULT_SUMMARY_WORDS = 30
+
+
+def _truncate_to_words(text: str, max_words: int = DEFAULT_SUMMARY_WORDS) -> str:
+    """Truncate text to a maximum number of words.
+
+    Args:
+        text: Text to truncate
+        max_words: Maximum number of words to keep
+
+    Returns:
+        Truncated text with "..." if truncated
+    """
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]) + "..."
+
+
+def _wrap_long_message(
+    text: str, threshold: int = DEFAULT_LONG_MESSAGE_THRESHOLD
+) -> tuple[str, str | None]:
+    """Wrap long messages in a collapsible <details> tag for Matrix.
+
+    Args:
+        text: Message text
+        threshold: Character threshold for collapsible wrapping
+
+    Returns:
+        Tuple of (plain_text, html_or_none). If html is None, send as plain text.
+    """
+    if len(text) <= threshold:
+        return text, None
+
+    summary = _truncate_to_words(text)
+    # Escape HTML in both summary and full content
+    safe_summary = html.escape(summary)
+    safe_text = html.escape(text)
+
+    # Format with <details> tag - use <pre> to preserve formatting
+    html_body = f"<details><summary>{safe_summary}</summary>\n<pre>{safe_text}</pre></details>"
+
+    return text, html_body
 
 
 class MatrixMonitor:
@@ -54,7 +99,12 @@ class MatrixMonitor:
         # Connect to Matrix
         await self.client.connect()
 
-        # Set up event callbacks
+        # Do initial sync WITHOUT event callbacks to skip historical messages
+        logger.info("Matrix monitor performing initial sync (skipping historical messages)...")
+        await self.client.sync(timeout=10000)
+        logger.info("Initial sync complete, now listening for new messages")
+
+        # Set up event callbacks AFTER initial sync
         self.client.add_event_callback(self.on_room_message, RoomMessageText)
 
         logger.info("Matrix monitor starting sync loop")
@@ -113,10 +163,18 @@ class MatrixMonitor:
             logger.debug("Bot user ID found in message!")
             return True
 
-        # Check for display name mention (e.g., "llm-assistant")
-        if "llm-assistant" in message.lower() or "llm-assitant" in message.lower():
-            logger.debug("Bot display name found in message!")
-            return True
+        # Check for display name at the START of message (e.g., "llm-assistant: question")
+        # This avoids false positives when the bot name is mentioned mid-sentence
+        msg_lower = message.lower().strip()
+        for name in ["llm-assistant", "llm-assitant"]:
+            # Match "name:" or "name," or "name " at start of message
+            if (
+                msg_lower.startswith(name + ":")
+                or msg_lower.startswith(name + ",")
+                or msg_lower.startswith(name + " ")
+            ):
+                logger.debug(f"Bot display name '{name}' found at start of message!")
+                return True
 
         logger.debug("Message not addressed to bot")
         return False
@@ -144,6 +202,11 @@ class MatrixMonitor:
             r"llm-assistant:?\s*", "", clean_message, flags=re.IGNORECASE
         ).strip()
         clean_message = re.sub(r"llm-assitant:?\s*", "", clean_message, flags=re.IGNORECASE).strip()
+
+        # Handle help command
+        if clean_message.lower().strip() in ("!h", "!help", "help"):
+            await self._send_help(room_id)
+            return
 
         # Parse command mode
         mode = self.determine_mode(clean_message)
@@ -197,7 +260,19 @@ class MatrixMonitor:
             )
 
             if response:
-                await self.client.send_message(room_id, response)
+                # Get long message threshold from config
+                behavior_config = self.config.get("behavior", {})
+                threshold = behavior_config.get(
+                    "max_message_length", DEFAULT_LONG_MESSAGE_THRESHOLD
+                )
+
+                # Wrap long messages in collapsible <details> tag
+                plain_text, html_body = _wrap_long_message(response, threshold)
+
+                if html_body:
+                    await self.client.send_html_message(room_id, plain_text, html_body)
+                else:
+                    await self.client.send_message(room_id, response)
 
                 # Save to history
                 await self.agent.history.add_message(
@@ -233,6 +308,47 @@ class MatrixMonitor:
 
         # Use default or classifier
         return self.command_config.get("default_mode", "serious")
+
+    async def _send_help(self, room_id: str) -> None:
+        """Send help message with available commands."""
+        # Check which tools are available
+        tools_config = self.agent.config.get("tools", {})
+        kb_config = tools_config.get("knowledge_base", {})
+        kb_name = kb_config.get("name", "Knowledge Base") if kb_config.get("enabled") else None
+
+        help_text = """**Available Commands**
+
+**Modes:**
+- `!s <message>` - Serious mode (default) - thoughtful responses with web tools
+- `!d <message>` - Sarcastic mode - witty, humorous responses
+- `!a <message>` - Agent mode - multi-turn research with tool chaining
+- `!p <message>` - Perplexity mode - web-enhanced AI responses
+- `!u <message>` - Unsafe mode - uncensored responses
+- `!h` - Show this help message
+
+**Tools Available:**
+- Web search and webpage visiting
+- Code execution (if configured)
+- Image generation (if configured)"""
+
+        if kb_name:
+            help_text += f"\n- {kb_name} search"
+
+        help_text += """
+
+**Examples:**
+```
+llm-assistant: what is QGIS?
+llm-assistant: !d tell me a GIS joke
+llm-assistant: !a research FOSS4G 2024
+```
+
+**Tips:**
+- Default mode is serious - no prefix needed for most questions
+- Use `!a` for complex research that needs multiple steps
+- Use `!d` when you want fun, sarcastic responses"""
+
+        await self.client.send_message(room_id, help_text)
 
     async def handle_proactive(self, room_id: str, sender: str, message: str) -> None:
         """Handle proactive interjecting.

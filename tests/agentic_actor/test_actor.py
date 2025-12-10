@@ -275,7 +275,7 @@ class TestAPIAgent:
         with patch.object(
             ModelRouter, "call_raw_with_model", new=AsyncMock(side_effect=fake_call_raw_with_model)
         ):
-            with pytest.raises(RuntimeError, match="coroutine raised StopIteration"):
+            with pytest.raises(RuntimeError, match="Agent took too many turns to research"):
                 await agent.run_agent([{"role": "user", "content": "Test query"}], arc="test")
 
     @pytest.mark.asyncio

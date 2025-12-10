@@ -152,6 +152,13 @@ The webpage visitor is **enabled by default** in local mode (no setup needed):
 
 ## 🤖 Bot Modes
 
+### Help (`!h`)
+Show available commands, modes, and tools. Use this to discover what the bot can do.
+
+```
+@bot: !h
+```
+
 ### Serious Mode (`!s`) - Default Mode with Web Tools
 **Default mode** with web browsing capabilities enabled. The bot can:
 - Visit and analyze webpages (using local webpage visitor)
@@ -355,6 +362,58 @@ Bot: [Generates image using configured model]
      ✅ Image generated: [URL to image]
 ```
 
+### 📚 Knowledge Base Search (`knowledge_base`)
+Search a custom PostgreSQL knowledge base with semantic extractions. Perfect for domain-specific Q&A using your own wiki or document corpus.
+
+**Features:**
+- Full-text search on page summaries, keywords, and titles
+- Entity search with fuzzy matching (people, organizations, projects)
+- Relationship queries (knowledge graph)
+- Fast async PostgreSQL queries via connection pooling
+- Configurable result limits
+
+**Use Cases:**
+- Organization wikis (OSGeo, company docs, etc.)
+- Domain-specific knowledge bases
+- Any corpus with entity extraction
+
+**Configuration:**
+```json
+{
+  "tools": {
+    "knowledge_base": {
+      "enabled": true,
+      "database_url": "postgresql:///your_database",
+      "name": "Your Knowledge Base",
+      "description": "Search for information about projects, people, and events.",
+      "max_results": 5,
+      "max_entities": 10
+    }
+  }
+}
+```
+
+**Pro Tip:** Add a hint in your system prompt to prioritize the knowledge base:
+```json
+{
+  "modes": {
+    "serious": {
+      "system_prompt": "You are a helpful assistant. You have access to a Knowledge Base tool - use it FIRST for domain-specific questions before trying web search."
+    }
+  }
+}
+```
+
+**Database Schema:** See [docs/KNOWLEDGE_BASE.md](docs/KNOWLEDGE_BASE.md) for the expected PostgreSQL schema and setup guide.
+
+**Example:**
+```
+User: Who is strk in the OSGeo community?
+Bot: [Searches knowledge_base for "strk"]
+     Based on the OSGeo Wiki, "strk" is Sandro Santilli, a prominent
+     OSGeo contributor involved in PostGIS and infrastructure projects...
+```
+
 ### 📊 Other Agent Tools
 
 - **`progress_report`** - Send real-time progress updates during long operations
@@ -395,6 +454,7 @@ Bot: [Generates image using configured model]
 | `execute_python` | ✅ Yes | Paid | [E2B](https://e2b.dev) |
 | `generate_image` | ✅ Yes | Paid | OpenRouter account |
 | `share_artifact` | ❌ No | Free | Configure local path + URL |
+| `knowledge_base` | ❌ No | Free | PostgreSQL database ([schema](docs/KNOWLEDGE_BASE.md)) |
 
 **Note:** For llama.cpp models to support tools, start the server with `--jinja` flag:
 ```bash
@@ -424,16 +484,79 @@ Agent:
 
 ## CLI Testing Mode
 
-You can test the bot's message handling including command parsing from the command line:
+Test the bot locally without connecting to Matrix. This is useful for:
+- Testing your configuration and API keys
+- Verifying tool functionality (knowledge base, web search, etc.)
+- Debugging prompts and model behavior
+- Development and experimentation
+
+### Basic Usage
 
 ```bash
-uv run matrix-llmagent --message "!h"
-uv run matrix-llmagent --message "tell me a joke"
-uv run matrix-llmagent --message "!d tell me a joke"
-uv run matrix-llmagent --message "!a summarize https://python.org" --config /path/to/config.json
+# Default (serious mode)
+uv run matrix-llmagent --message "What is QGIS?"
+
+# With custom config file
+uv run matrix-llmagent --message "Hello" --config /path/to/config.json
 ```
 
-This simulates message handling including command parsing and automatic mode classification, useful for testing your configuration and API keys.
+### Mode Prefixes
+
+Use the same mode prefixes as in Matrix:
+
+```bash
+# Show help with all available commands
+uv run matrix-llmagent --message "!h"
+
+# Serious mode (default) - with web tools
+uv run matrix-llmagent --message "What is PostGIS?"
+uv run matrix-llmagent --message "!s What is PostGIS?"
+
+# Sarcastic mode - witty responses
+uv run matrix-llmagent --message "!d Tell me a GIS joke"
+
+# Agent mode - multi-turn research
+uv run matrix-llmagent --message "!a Research FOSS4G 2024 and summarize"
+
+# Unsafe mode - uncensored
+uv run matrix-llmagent --message "!u Controversial question"
+
+# Perplexity mode - web-enhanced AI
+uv run matrix-llmagent --message "!p Latest news about open source GIS"
+```
+
+### Output
+
+The CLI shows:
+- Mode and model being used
+- Tool calls and results (in logs)
+- Final response
+
+```
+Mode: serious
+Model: llamacpp:qwen3-coder-30b-32k
+Query: What is QGIS?
+------------------------------------------------------------
+[tool calls and processing...]
+------------------------------------------------------------
+QGIS is an Open Source Geographic Information System...
+```
+
+### Testing Knowledge Base
+
+If you have a knowledge base configured:
+
+```bash
+# Test knowledge base queries
+uv run matrix-llmagent --message "Who is strk in OSGeo?"
+uv run matrix-llmagent --message "What FOSS4G conferences happened in 2023?"
+```
+
+### Requirements
+
+- `config.json` must exist with valid configuration
+- For llama.cpp: server must be running with `--jinja` flag
+- For cloud providers: API keys must be configured
 
 ### Chronicler
 

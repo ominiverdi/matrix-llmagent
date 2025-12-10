@@ -695,30 +695,36 @@ All tests must pass!
 ## Success Criteria
 
 ### Minimum Viable Product (MVP)
-- [ ] Bot connects to Matrix
-- [ ] Receives and sends messages
-- [ ] Responds to @mentions
-- [ ] All three modes work (sarcastic/serious/unsafe)
-- [ ] Basic tool use (web search)
-- [ ] Chronicle system works
-- [ ] llama.cpp provider works
-- [ ] Tests pass
+- [x] Bot connects to Matrix
+- [x] Receives and sends messages
+- [x] Responds to @mentions
+- [x] All three modes work (sarcastic/serious/unsafe)
+- [x] Basic tool use (web search)
+- [x] Chronicle system works
+- [x] llama.cpp provider works
+- [x] Tests pass
 
 ### Full Feature Parity
-- [ ] All original features working in Matrix
-- [ ] Proactive interjecting
-- [ ] Quest system
-- [ ] All tools (search, code exec, artifacts)
+- [x] All original features working in Matrix
+- [x] Proactive interjecting
+- [x] Quest system
+- [x] All tools (search, code exec, artifacts)
 - [ ] HTML formatting
-- [ ] Comprehensive tests
-- [ ] Complete documentation
+- [x] Comprehensive tests
+- [x] Complete documentation
 
 ### Stretch Goals
 - [ ] Matrix-specific features (reactions, threads, edits)
 - [ ] File upload for artifacts
 - [ ] Admin commands via Matrix
-- [ ] Multi-room support
-- [ ] Improved llama.cpp tool support
+- [x] Multi-room support
+- [x] Improved llama.cpp tool support (--jinja flag documented)
+
+### New Features (Post-Migration)
+- [x] **Knowledge Base Tool** - PostgreSQL-backed semantic search for domain-specific Q&A
+- [x] **CLI Testing Mode** - Full command-line testing without Matrix connection
+- [x] **Conditional Tool Loading** - Tools only available when properly configured
+- [x] **Initial Sync Skip** - Bot ignores historical messages on startup
 
 ---
 
@@ -773,16 +779,17 @@ All tests must pass!
 ## Post-Launch Tasks
 
 ### Immediate (Week 4)
-- [ ] Monitor for bug reports
-- [ ] Gather user feedback
-- [ ] Quick fixes for critical issues
+- [x] Monitor for bug reports
+- [x] Gather user feedback
+- [x] Quick fixes for critical issues
 - [ ] Performance monitoring
 
 ### Short-term (Month 2-3)
 - [ ] Add Matrix-specific features (reactions, threads)
-- [ ] Improve llama.cpp tool support
-- [ ] Add more examples and guides
+- [x] Improve llama.cpp tool support
+- [x] Add more examples and guides
 - [ ] Video tutorial for setup
+- [x] Knowledge base integration for domain-specific Q&A
 
 ### Long-term (Month 4+)
 - [ ] E2E encryption support
@@ -790,6 +797,8 @@ All tests must pass!
 - [ ] Model fine-tuning guides
 - [ ] Community contributions
 - [ ] Consider additional features based on feedback
+- [ ] Vector embeddings for semantic search in knowledge base
+- [ ] RAG (Retrieval Augmented Generation) improvements
 
 ---
 
@@ -808,12 +817,32 @@ Before starting implementation:
 
 ## Next Steps
 
-Once this plan is approved:
+### Completed Milestones
 
-1. Create PLAN.md ✅ (you are here)
-2. Execute Phase 1 (Repository Setup)
-3. Create development branch
-4. Begin Phase 2 (Package Renaming)
-5. Iterate through phases with testing at each step
+1. ✅ Create PLAN.md
+2. ✅ Execute Phase 1 (Repository Setup)
+3. ✅ Phase 2 (Package Renaming)
+4. ✅ Phase 3 (Remove IRC Code)
+5. ✅ Phase 4 (Add Matrix Support)
+6. ✅ Phase 5 (Add llama.cpp Support)
+7. ✅ Phase 6 (Update Tests)
+8. ✅ Phase 7 (Documentation)
+9. ✅ Phase 8 (Testing & Polish)
 
-**Ready to begin?** Start with Phase 1: Repository Setup! 🚀
+### Recent Additions (December 2024)
+
+- ✅ **Knowledge Base Tool** - PostgreSQL semantic search integration
+- ✅ **CLI Testing Mode** - Full offline testing capability
+- ✅ **Improved Tool Loading** - Conditional tool availability based on config
+- ✅ **Bot Mention Detection** - Fixed false positives in message detection
+- ✅ **Initial Sync Skip** - Prevents responding to historical messages
+
+### Future Roadmap
+
+1. **Vector Search** - Add embedding-based semantic search to knowledge base
+2. **Matrix Reactions** - React to messages with emojis
+3. **Thread Support** - Reply in Matrix threads
+4. **E2E Encryption** - Encrypted room support
+5. **Admin Commands** - Bot management via Matrix messages
+
+**Status:** Migration complete! Bot is production-ready.
