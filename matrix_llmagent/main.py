@@ -10,7 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from .agentic_actor import AgenticLLMActor
-from .agentic_actor.tools import knowledge_base_tool_def
+from .agentic_actor.tools import (
+    entity_info_tool_def,
+    knowledge_base_tool_def,
+    relationship_search_tool_def,
+)
 from .chronicler.chronicle import Chronicle
 from .chronicler.quests import QuestOperator
 from .history import ChatHistory
@@ -85,7 +89,12 @@ class MatrixLLMAgent:
                 "description",
                 f"Search {kb_name} for information about projects, people, organizations, and events.",
             )
+            predicate_hints = kb_config.get("predicate_hints", {})
             self.additional_tools.append(dict(knowledge_base_tool_def(kb_name, kb_description)))
+            self.additional_tools.append(
+                dict(relationship_search_tool_def(kb_name, predicate_hints))
+            )
+            self.additional_tools.append(dict(entity_info_tool_def(kb_name)))
             logger.info(f"Knowledge base tool enabled: {kb_name}")
 
     async def run_actor(
@@ -107,13 +116,17 @@ class MatrixLLMAgent:
         kb_config = self.config.get("tools", {}).get("knowledge_base", {})
         if kb_config.get("enabled"):
             kb_name = kb_config.get("name", "Knowledge Base")
+            kb_description = kb_config.get("description", "")
             system_prompt = system_prompt + (
-                f"\n\nIMPORTANT: You have access to a local knowledge base ({kb_name}) that contains "
-                "internal documentation, infrastructure details, and specialized information not available "
-                "on the public web. When searching this knowledge base, use the EXACT terms from the user's "
-                "question - do not assume typos or 'correct' unfamiliar terms. The knowledge base may contain "
-                "information about internal systems, servers, or projects that you don't recognize from your "
-                "training data. Trust the user's terminology and search for it verbatim first."
+                f"\n\nIMPORTANT: You have access to a local knowledge base ({kb_name}) with two tools:\n"
+                f"1. knowledge_base: Full-text search for pages, entities, and general information\n"
+                f"2. relationship_search: Query structured relationships (leadership, projects, chapters, events)\n\n"
+                f"ALWAYS try the local knowledge base tools FIRST before using web_search. "
+                f"{kb_description}\n\n"
+                "For questions about 'who is X', 'what are the projects/chapters/events', use relationship_search "
+                "with the appropriate predicate. For general information queries, use knowledge_base.\n\n"
+                "When searching, use the EXACT terms from the user's question - do not assume typos or 'correct' "
+                "unfamiliar terms. Only use web_search if the local knowledge base doesn't have the information."
             )
 
         actor = AgenticLLMActor(
@@ -209,10 +222,10 @@ Tools Available:
 
     print("""
 Examples:
-  uv run matrix-llmagent --message "what is QGIS?"
-  uv run matrix-llmagent --message "!v what is QGIS?"
-  uv run matrix-llmagent --message "!d tell me a GIS joke"
-  uv run matrix-llmagent --message "!a research FOSS4G 2024"
+  uv run matrix-llmagent --message "what is Python?"
+  uv run matrix-llmagent --message "!v explain machine learning"
+  uv run matrix-llmagent --message "!d tell me a programming joke"
+  uv run matrix-llmagent --message "!a research recent AI developments"
 
 Tips:
   - Responses are concise by default (1 sentence) - say "tell me more" for details

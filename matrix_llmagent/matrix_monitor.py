@@ -19,13 +19,13 @@ DEFAULT_SUMMARY_WORDS = 30
 DEFAULT_PASTE_THRESHOLD = 2000
 
 
-# TODO: Implement when paste.osgeo.org is available
+# TODO: Implement paste service support
 # async def _upload_to_paste_service(text: str, paste_url: str) -> str | None:
 #     """Upload long text to paste service and return the URL.
 #
 #     Args:
 #         text: Text content to upload
-#         paste_url: Base URL of paste service (e.g., "https://paste.osgeo.org")
+#         paste_url: Base URL of paste service (e.g., "https://paste.example.com")
 #
 #     Returns:
 #         URL to the paste, or None if upload failed
@@ -42,7 +42,7 @@ DEFAULT_PASTE_THRESHOLD = 2000
 #         "behavior": {
 #             "paste_service": {
 #                 "enabled": true,
-#                 "url": "https://paste.osgeo.org",
+#                 "url": "https://paste.example.com",
 #                 "threshold": 2000
 #             }
 #         }
@@ -401,10 +401,10 @@ class MatrixMonitor:
 
 **Examples:**
 ```
-llm-assistant: what is QGIS?
-llm-assistant: !v what is QGIS?
-llm-assistant: !d tell me a GIS joke
-llm-assistant: !a research FOSS4G 2024
+llm-assistant: what is Python?
+llm-assistant: !v explain machine learning
+llm-assistant: !d tell me a programming joke
+llm-assistant: !a research recent AI developments
 ```
 
 **Tips:**

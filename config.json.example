@@ -54,6 +54,25 @@
             "description": "Search the knowledge base for information about projects, people, organizations, and events.",
             "max_results": 5,
             "max_entities": 10,
+            "predicate_hints": {
+                "_comment": "Domain-specific predicate hints to help the model use relationship_search effectively. These are EXAMPLES - customize for your knowledge base.",
+                "is_annual_conference": {
+                    "description": "Annual conferences (e.g., 2020-2026)",
+                    "hint": "no filter needed - returns all events. For locations, use entity_info with name='Conference 20', match='prefix', predicates='located_in,happened_in'"
+                },
+                "is_project_of": {
+                    "description": "Official projects of an organization",
+                    "hint": "filter: object=OrgName"
+                },
+                "is_chapter_of": {
+                    "description": "Local chapters of an organization",
+                    "hint": "filter: object=OrgName"
+                },
+                "is_board_member_of": {
+                    "description": "Board members of an organization",
+                    "hint": "filter: object=OrgName"
+                }
+            }
         },
     },
     "actor": {

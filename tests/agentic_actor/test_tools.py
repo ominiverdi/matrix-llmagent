@@ -490,7 +490,9 @@ class TestToolRegistry:
         with patch.object(WebSearchExecutor, "execute", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = "Search results"
 
-            tool_executors = create_tool_executors(agent=mock_agent, arc="test")
+            # search_provider must be explicitly configured to enable web_search
+            config = {"tools": {"search_provider": "auto"}}
+            tool_executors = create_tool_executors(config, agent=mock_agent, arc="test")
             result = await execute_tool("web_search", tool_executors, query="test")
 
             assert result == "Search results"
@@ -573,8 +575,9 @@ class TestToolDefinitions:
 
         # execute_python should NOT be available without E2B API key
         assert "execute_python" not in executors
+        # web_search requires explicit search_provider config, not available by default
+        assert "web_search" not in executors
         # But basic tools should always be available
-        assert "web_search" in executors
         assert "visit_webpage" in executors
         assert "final_answer" in executors
 

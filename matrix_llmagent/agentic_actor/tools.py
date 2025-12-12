@@ -227,6 +227,139 @@ def knowledge_base_tool_def(name: str, description: str) -> Tool:
     }
 
 
+def _build_predicate_description(predicate_hints: dict[str, dict] | None) -> str:
+    """Build predicate description from config hints.
+
+    Args:
+        predicate_hints: Optional dict of predicate -> {description, hint, filter} from config
+
+    Returns:
+        Formatted description string for the predicate parameter
+    """
+    # Default generic predicates (always included as base)
+    base_description = (
+        "The predicate name (relationship type). Common predicates:\n"
+        "- is_president_of, was_president_of (filter: object=OrgName)\n"
+        "- is_member_of, is_board_member_of, is_project_of, is_chapter_of\n"
+        "- founded_by, founded_in (filter: subject=OrgName)\n"
+        "- located_in, happened_in (filter: subject=EntityName)"
+    )
+
+    if not predicate_hints:
+        return base_description
+
+    # Add domain-specific hints from config
+    hint_lines = []
+    for predicate, info in predicate_hints.items():
+        if isinstance(info, dict):
+            desc = info.get("description", "")
+            hint = info.get("hint", "")
+            if desc and hint:
+                hint_lines.append(f"- {predicate}: {desc} ({hint})")
+            elif desc:
+                hint_lines.append(f"- {predicate}: {desc}")
+            elif hint:
+                hint_lines.append(f"- {predicate} ({hint})")
+            else:
+                hint_lines.append(f"- {predicate}")
+
+    if hint_lines:
+        return base_description + "\nDomain-specific:\n" + "\n".join(hint_lines)
+
+    return base_description
+
+
+def relationship_search_tool_def(name: str, predicate_hints: dict[str, dict] | None = None) -> Tool:
+    """Generate relationship_search tool definition for querying entity relationships.
+
+    Args:
+        name: Knowledge base name for description
+        predicate_hints: Optional dict of predicate hints from config
+    """
+    return {
+        "name": "relationship_search",
+        "description": (
+            f"Search relationships between entities in {name}. "
+            "Relationships are stored as: subject -> predicate -> object. "
+            "IMPORTANT: Always filter by subject or object to get relevant results."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "predicate": {
+                    "type": "string",
+                    "description": _build_predicate_description(predicate_hints),
+                },
+                "subject": {
+                    "type": "string",
+                    "description": (
+                        "Filter by left side of relationship. "
+                        "Use for: 'who founded X?' -> subject=X, predicate=founded_by"
+                    ),
+                },
+                "object": {
+                    "type": "string",
+                    "description": (
+                        "Filter by right side of relationship. "
+                        "Use for: 'who is president of X?' -> object=X, predicate=is_president_of"
+                    ),
+                },
+            },
+            "required": ["predicate"],
+        },
+        "persist": "summary",
+    }
+
+
+def entity_info_tool_def(name: str) -> Tool:
+    """Generate entity_info tool definition for exploring entities and their relationships."""
+    return {
+        "name": "entity_info",
+        "description": (
+            f"Get information about entities in {name}. "
+            "Returns entity type and all relationships for matching entities. "
+            "Supports batch queries: use match='prefix' with a common prefix "
+            "to get all matching entities at once. "
+            "Use this to explore what data exists for a topic."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": (
+                        "Entity name or pattern to search for. "
+                        "For batch queries, use a common prefix."
+                    ),
+                },
+                "match": {
+                    "type": "string",
+                    "enum": ["exact", "prefix", "contains"],
+                    "description": (
+                        "Match type: 'exact' for exact name, "
+                        "'prefix' for starts-with (RECOMMENDED for batch queries), "
+                        "'contains' for substring match. Default: 'contains'."
+                    ),
+                },
+                "predicates": {
+                    "type": "string",
+                    "description": (
+                        "Optional: comma-separated list of predicates to filter results. "
+                        "Example: 'located_in,happened_in' to only show locations and years. "
+                        "If not specified, returns all relationships."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max entities to return (default: 50, max: 100).",
+                },
+            },
+            "required": ["name"],
+        },
+        "persist": "summary",
+    }
+
+
 class RateLimiter:
     """Simple rate limiter for tool calls."""
 
@@ -1083,7 +1216,7 @@ class KnowledgeBaseSearchExecutor:
 
         Returns a list of query variants to try, in order of preference:
         1. Original query
-        2. Split on number+word boundaries (e.g., 'OSGeo4Server' -> 'OSGeo4 Server')
+        2. Split on number+word boundaries (e.g., 'Project4Server' -> 'Project4 Server')
         3. Split on CamelCase (e.g., 'GeoServer' -> 'Geo Server')
         """
         import re
@@ -1091,7 +1224,7 @@ class KnowledgeBaseSearchExecutor:
         variants = [query]
 
         # Variant: split number + word (2+ letters)
-        # e.g., "OSGeo4Server" -> "OSGeo4 Server", but "OSGeo4W" stays intact
+        # e.g., "Test4Server" -> "Test4 Server", but "Test4W" stays intact
         split_num = re.sub(r"([0-9])([a-zA-Z]{2,})", r"\1 \2", query)
         if split_num != query and split_num not in variants:
             variants.append(split_num)
@@ -1292,6 +1425,311 @@ class KnowledgeBaseSearchExecutor:
             self._pool = None
 
 
+class RelationshipSearchExecutor:
+    """Search entity relationships in a PostgreSQL knowledge base.
+
+    This tool allows the model to query relationships by predicate type,
+    with optional subject/object filters. It provides a flexible way to
+    answer questions about organizational structure, leadership, projects, etc.
+    """
+
+    def __init__(self, database_url: str, name: str = "Knowledge Base"):
+        self.database_url = database_url
+        self.name = name
+        self._pool: Any | None = None
+
+    async def _get_pool(self):
+        """Get or create connection pool."""
+        if self._pool is None:
+            import asyncpg
+
+            self._pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=5)
+        return self._pool
+
+    async def execute(
+        self, predicate: str, subject: str | None = None, object: str | None = None
+    ) -> str:
+        """Search relationships by predicate with optional subject/object filters."""
+        try:
+            pool = await self._get_pool()
+        except Exception as e:
+            logger.error(f"Failed to connect to knowledge base: {e}")
+            return f"Error: Failed to connect to {self.name}: {e}"
+
+        async with pool.acquire() as conn:
+            # Build query based on filters
+            if subject and object:
+                rows = await conn.fetch(
+                    """
+                    SELECT s.entity_name AS subject, r.predicate, o.entity_name AS object
+                    FROM entity_relationships r
+                    JOIN entities s ON r.subject_id = s.id
+                    JOIN entities o ON r.object_id = o.id
+                    WHERE r.predicate = $1
+                      AND s.entity_name ILIKE $2
+                      AND o.entity_name ILIKE $3
+                    ORDER BY s.entity_name
+                    LIMIT 50
+                    """,
+                    predicate,
+                    f"%{subject}%",
+                    f"%{object}%",
+                )
+            elif subject:
+                rows = await conn.fetch(
+                    """
+                    SELECT s.entity_name AS subject, r.predicate, o.entity_name AS object
+                    FROM entity_relationships r
+                    JOIN entities s ON r.subject_id = s.id
+                    JOIN entities o ON r.object_id = o.id
+                    WHERE r.predicate = $1
+                      AND s.entity_name ILIKE $2
+                    ORDER BY s.entity_name
+                    LIMIT 50
+                    """,
+                    predicate,
+                    f"%{subject}%",
+                )
+            elif object:
+                rows = await conn.fetch(
+                    """
+                    SELECT s.entity_name AS subject, r.predicate, o.entity_name AS object
+                    FROM entity_relationships r
+                    JOIN entities s ON r.subject_id = s.id
+                    JOIN entities o ON r.object_id = o.id
+                    WHERE r.predicate = $1
+                      AND o.entity_name ILIKE $2
+                    ORDER BY s.entity_name
+                    LIMIT 50
+                    """,
+                    predicate,
+                    f"%{object}%",
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT s.entity_name AS subject, r.predicate, o.entity_name AS object
+                    FROM entity_relationships r
+                    JOIN entities s ON r.subject_id = s.id
+                    JOIN entities o ON r.object_id = o.id
+                    WHERE r.predicate = $1
+                    ORDER BY s.entity_name
+                    LIMIT 50
+                    """,
+                    predicate,
+                )
+
+        if not rows:
+            filters = []
+            if subject:
+                filters.append(f"subject='{subject}'")
+            if object:
+                filters.append(f"object='{object}'")
+            filter_str = f" with filters: {', '.join(filters)}" if filters else ""
+            return f"No relationships found for predicate '{predicate}'{filter_str}"
+
+        # Format results
+        results = [f"## Relationships: {predicate}"]
+        for row in rows:
+            results.append(f"- {row['subject']} -> {row['object']}")
+
+        # Add hint for getting more details if multiple results
+        if len(rows) > 3:
+            # Find common prefix of subjects for hint
+            subjects = [row["subject"] for row in rows]
+            common_prefix = subjects[0]
+            for s in subjects[1:]:
+                while common_prefix and not s.startswith(common_prefix):
+                    common_prefix = common_prefix[:-1]
+            if len(common_prefix) >= 5:
+                results.append(
+                    f"\nTip: Use entity_info with name='{common_prefix.rstrip()}', "
+                    "match='prefix', predicates='located_in,happened_in' to get details for all."
+                )
+
+        logger.info(f"Relationship search '{predicate}': {len(rows)} results")
+        return "\n".join(results)
+
+    async def cleanup(self):
+        """Close the connection pool."""
+        if self._pool:
+            await self._pool.close()
+            self._pool = None
+
+
+class EntityInfoExecutor:
+    """Get information about entities and their relationships.
+
+    This tool allows exploring entities by name pattern, returning
+    all relevant relationships in one query. Useful for batch queries
+    like listing all events with their locations.
+    """
+
+    def __init__(self, database_url: str, name: str = "Knowledge Base"):
+        self.database_url = database_url
+        self.name = name
+        self._pool: Any | None = None
+
+    async def _get_pool(self):
+        """Get or create connection pool."""
+        if self._pool is None:
+            import asyncpg
+
+            self._pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=5)
+        return self._pool
+
+    async def execute(
+        self,
+        name: str,
+        match: str = "contains",
+        predicates: str | None = None,
+        limit: int = 50,
+    ) -> str:
+        """Get entity info with relationships."""
+        try:
+            pool = await self._get_pool()
+        except Exception as e:
+            logger.error(f"Failed to connect to knowledge base: {e}")
+            return f"Error: Failed to connect to {self.name}: {e}"
+
+        # Validate and cap limit
+        limit = min(max(1, limit), 100)
+
+        # Build name pattern based on match type
+        if match == "exact":
+            name_pattern = name
+            name_condition = "s.entity_name = $1"
+        elif match == "prefix":
+            name_pattern = f"{name}%"
+            name_condition = "s.entity_name ILIKE $1"
+        else:  # contains
+            name_pattern = f"%{name}%"
+            name_condition = "s.entity_name ILIKE $1"
+
+        # Parse predicates filter
+        predicate_filter = ""
+        if predicates:
+            pred_list = [p.strip() for p in predicates.split(",") if p.strip()]
+            if pred_list:
+                placeholders = ", ".join(f"${i + 2}" for i in range(len(pred_list)))
+                predicate_filter = f"AND r.predicate IN ({placeholders})"
+
+        async with pool.acquire() as conn:
+            # Build name condition
+            if match == "exact":
+                entity_name_condition = "e.entity_name = $1"
+            else:
+                entity_name_condition = "e.entity_name ILIKE $1"
+
+            # Parse predicates filter
+            pred_list = []
+            if predicates:
+                pred_list = [p.strip() for p in predicates.split(",") if p.strip()]
+
+            if pred_list:
+                # When predicates specified, query entities that HAVE those predicates
+                placeholders = ", ".join(f"${i + 2}" for i in range(len(pred_list)))
+                query = f"""
+                    SELECT 
+                        e.entity_name AS entity,
+                        e.entity_type,
+                        r.predicate,
+                        o.entity_name AS related_to
+                    FROM entities e
+                    JOIN entity_relationships r ON e.id = r.subject_id
+                    JOIN entities o ON r.object_id = o.id
+                    WHERE {entity_name_condition}
+                      AND r.predicate IN ({placeholders})
+                    ORDER BY e.entity_name, r.predicate, o.entity_name
+                    LIMIT ${len(pred_list) + 2}
+                """
+                rows = await conn.fetch(query, name_pattern, *pred_list, limit * 10)
+            else:
+                # No predicate filter - get entities first, then all relationships
+                entity_query = f"""
+                    SELECT DISTINCT id, entity_name, entity_type
+                    FROM entities e
+                    WHERE {entity_name_condition.replace("e.", "")}
+                    ORDER BY entity_name
+                    LIMIT $2
+                """
+                entity_rows = await conn.fetch(entity_query, name_pattern, limit)
+
+                if not entity_rows:
+                    return f"No entities found matching '{name}' (match={match})"
+
+                entity_ids = [row["id"] for row in entity_rows]
+
+                rel_query = """
+                    SELECT 
+                        s.entity_name AS entity,
+                        s.entity_type,
+                        r.predicate,
+                        o.entity_name AS related_to
+                    FROM entities s
+                    JOIN entity_relationships r ON s.id = r.subject_id
+                    JOIN entities o ON r.object_id = o.id
+                    WHERE s.id = ANY($1)
+                    ORDER BY s.entity_name, r.predicate, o.entity_name
+                """
+                rows = await conn.fetch(rel_query, entity_ids)
+
+        if not rows:
+            return f"No entities found matching '{name}' with specified predicates"
+
+        # Group results by entity
+        entities: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            entity_name = row["entity"]
+            if entity_name not in entities:
+                entities[entity_name] = {
+                    "type": row["entity_type"],
+                    "relationships": {},
+                }
+            pred = row["predicate"]
+            if pred not in entities[entity_name]["relationships"]:
+                entities[entity_name]["relationships"][pred] = []
+            entities[entity_name]["relationships"][pred].append(row["related_to"])
+
+        # Format output - use compact list format for multiple entities
+        if len(entities) > 1:
+            # Compact list format: "- EntityName: pred1=val1, pred2=val2"
+            results = [f"## {len(entities)} entities matching '{name}'"]
+            for entity_name, info in entities.items():
+                parts = []
+                for pred, values in info["relationships"].items():
+                    if len(values) == 1:
+                        parts.append(f"{values[0]}")
+                    else:
+                        parts.append(f"{pred}: {', '.join(values[:3])}")
+                if parts:
+                    results.append(f"- {entity_name}: {', '.join(parts)}")
+                else:
+                    results.append(f"- {entity_name}")
+        else:
+            # Detailed format for single entity
+            results = [f"## Entities matching '{name}' ({len(entities)} found)"]
+            for entity_name, info in entities.items():
+                results.append(f"\n### {entity_name} ({info['type']})")
+                for pred, values in info["relationships"].items():
+                    if len(values) > 5:
+                        display_values = values[:5] + [f"... and {len(values) - 5} more"]
+                    else:
+                        display_values = values
+                    results.append(f"- {pred}: {', '.join(display_values)}")
+
+        logger.info(
+            f"Entity info '{name}' (match={match}): {len(entities)} entities, {len(rows)} relationships"
+        )
+        return "\n".join(results)
+
+    async def cleanup(self):
+        """Close the connection pool."""
+        if self._pool:
+            await self._pool.close()
+            self._pool = None
+
+
 def create_tool_executors(
     config: dict | None = None,
     *,
@@ -1314,7 +1752,7 @@ def create_tool_executors(
 
     # Search provider config
     tools_config = config.get("tools", {}) if config else {}
-    search_provider = tools_config.get("search_provider", "auto")
+    search_provider = tools_config.get("search_provider")  # None if not configured
 
     # Create appropriate search executor based on provider
     # Set to None if disabled (empty string, "none", or "disabled")
@@ -1398,6 +1836,20 @@ def create_tool_executors(
             max_entities=kb_config.get("max_entities", 10),
         )
         logger.info(f"Knowledge base search enabled: {kb_config.get('name', 'Knowledge Base')}")
+
+        # Add relationship_search alongside knowledge_base
+        executors["relationship_search"] = RelationshipSearchExecutor(
+            database_url=kb_config["database_url"],
+            name=kb_config.get("name", "Knowledge Base"),
+        )
+        logger.info("Relationship search enabled")
+
+        # Add entity_info alongside knowledge_base
+        executors["entity_info"] = EntityInfoExecutor(
+            database_url=kb_config["database_url"],
+            name=kb_config.get("name", "Knowledge Base"),
+        )
+        logger.info("Entity info enabled")
 
     return executors
 

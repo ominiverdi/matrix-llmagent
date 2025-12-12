@@ -1,14 +1,14 @@
 # Knowledge Base Tool Setup
 
-The `knowledge_base` tool allows your bot to search a PostgreSQL database with semantic extractions from wikis, documentation, or any text corpus. This enables domain-specific Q&A that goes beyond general web search.
+The knowledge base tools allow your bot to search a PostgreSQL database with semantic extractions from wikis, documentation, or any text corpus. This enables domain-specific Q&A that goes beyond general web search.
 
 ## Overview
 
-The tool provides three types of search:
+Three tools are provided:
 
-1. **Full-text search** on page content (summaries, keywords, titles)
-2. **Entity search** with fuzzy matching (people, organizations, projects, etc.)
-3. **Relationship queries** from a knowledge graph (who works with whom, project dependencies, etc.)
+1. **`knowledge_base`** - Full-text search on page content (summaries, keywords, titles) and entity fuzzy matching
+2. **`relationship_search`** - Query structured relationships by predicate (leadership, projects, chapters, events)
+3. **`entity_info`** - Get detailed information about entities and their relationships, with batch query support
 
 ## Database Schema
 
@@ -120,9 +120,19 @@ Add to your `config.json`:
       "enabled": true,
       "database_url": "postgresql://user:password@localhost/dbname",
       "name": "My Knowledge Base",
-      "description": "Search for information about projects, people, and events.",
+      "description": "Search for information about projects, people, and events. Use this FIRST before web_search.",
       "max_results": 5,
-      "max_entities": 10
+      "max_entities": 10,
+      "predicate_hints": {
+        "is_annual_conference": {
+          "description": "Annual conferences",
+          "hint": "no filter needed - returns all events"
+        },
+        "is_project_of": {
+          "description": "Official projects of an organization",
+          "hint": "filter: object=OrgName"
+        }
+      }
     }
   }
 }
@@ -132,12 +142,22 @@ Add to your `config.json`:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enabled` | boolean | `false` | Enable/disable the knowledge base tool |
+| `enabled` | boolean | `false` | Enable/disable the knowledge base tools |
 | `database_url` | string | required | PostgreSQL connection string |
 | `name` | string | "Knowledge Base" | Display name shown in results |
-| `description` | string | auto | Tool description shown to the LLM |
+| `description` | string | auto | Tool description shown to the LLM (used in system prompt) |
 | `max_results` | integer | 5 | Maximum pages to return |
 | `max_entities` | integer | 10 | Maximum entities to return |
+| `predicate_hints` | object | `{}` | Domain-specific predicate hints for `relationship_search` |
+
+### Predicate Hints
+
+The `predicate_hints` config lets you guide the LLM on how to use domain-specific predicates. Each hint has:
+
+- `description`: What relationships this predicate represents
+- `hint`: Usage guidance (filters, special notes)
+
+These hints are included in the `relationship_search` tool description, helping the model choose the right predicate for queries like "list all conferences" or "who are the board members".
 
 ### Connection String Formats
 
@@ -246,12 +266,56 @@ If searches return no results:
 - Ensure pg_trgm extension is installed for entity fuzzy search
 - Consider VACUUM ANALYZE on tables after bulk inserts
 
-## Example Queries
+## Tool Usage
 
-The tool executes queries similar to:
+### `knowledge_base` Tool
+
+Full-text search for pages and entities:
+
+```
+User: "what is QGIS?"
+Tool: knowledge_base(query="QGIS")
+```
+
+### `relationship_search` Tool
+
+Query relationships by predicate:
+
+```
+User: "who is president of MyOrg?"
+Tool: relationship_search(predicate="is_president_of", object="MyOrg")
+
+User: "list all local chapters"
+Tool: relationship_search(predicate="is_chapter_of")
+```
+
+### `entity_info` Tool
+
+Get detailed info about entities. Supports batch queries with prefix matching:
+
+```
+User: "tell me about Conference 2024"
+Tool: entity_info(name="Conference 2024", match="exact")
+
+User: "list all conferences with their locations"
+Tool: entity_info(name="Conference 20", match="prefix", predicates="located_in,happened_in")
+```
+
+The `entity_info` tool returns compact list output for multiple entities:
+```
+## 21 entities matching 'Conference 20'
+- Conference 2020: 2020, New York, USA
+- Conference 2021: 2021, London, UK
+- Conference 2022: 2022, Tokyo, Japan
+...
+```
+
+## Example SQL Queries
+
+The tools execute queries similar to:
 
 ```sql
--- Full-text page search
+-- Full-text page search (knowledge_base)
 SELECT page_title, url, resume
 FROM page_extensions
 WHERE resume_tsv @@ websearch_to_tsquery('english', 'QGIS')
@@ -259,7 +323,7 @@ WHERE resume_tsv @@ websearch_to_tsquery('english', 'QGIS')
 ORDER BY ts_rank(resume_tsv, websearch_to_tsquery('english', 'QGIS')) DESC
 LIMIT 5;
 
--- Entity fuzzy search
+-- Entity fuzzy search (knowledge_base)
 SELECT entity_name, entity_type, url
 FROM entities
 WHERE entity_name % 'Anita'  -- trigram similarity
@@ -267,12 +331,24 @@ WHERE entity_name % 'Anita'  -- trigram similarity
 ORDER BY similarity(entity_name, 'Anita') DESC
 LIMIT 10;
 
--- Relationship lookup
+-- Relationship search (relationship_search)
 SELECT s.entity_name AS subject, r.predicate, o.entity_name AS object
 FROM entity_relationships r
 JOIN entities s ON r.subject_id = s.id
 JOIN entities o ON r.object_id = o.id
-WHERE s.entity_name = 'Anita Graser' OR o.entity_name = 'Anita Graser';
+WHERE r.predicate = 'is_president_of'
+  AND o.entity_name ILIKE '%MyOrg%'
+ORDER BY s.entity_name
+LIMIT 50;
+
+-- Entity info with predicates (entity_info)
+SELECT e.entity_name, r.predicate, o.entity_name AS related_to
+FROM entities e
+JOIN entity_relationships r ON e.id = r.subject_id
+JOIN entities o ON r.object_id = o.id
+WHERE e.entity_name ILIKE 'Conference 20%'
+  AND r.predicate IN ('located_in', 'happened_in')
+ORDER BY e.entity_name;
 ```
 
 ## Security Considerations
