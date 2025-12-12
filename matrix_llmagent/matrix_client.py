@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from nio import AsyncClient, MatrixRoom, RoomMessageText
+from nio import AsyncClient
 
 logger = logging.getLogger(__name__)
 

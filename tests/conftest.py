@@ -52,33 +52,6 @@ def test_config(api_type, temp_chronicler_db_path, temp_history_db_path) -> dict
         "matrix": {
             "homeserver": "https://matrix.org",
             "user_id": "@testbot:matrix.org",
-            "access_token": "test_token_12345",
-            "device_id": "TEST_DEVICE",
-            "command": {
-                "history_size": 5,
-                "rate_limit": 30,
-                "rate_period": 900,
-                "ignore_users": [],
-                "default_mode": "serious",
-                "modes": {
-                    "sarcastic": {
-                        "model": f"{api_type}:dummy-sarcastic",
-                        "prompt": "You are {mynick} known for sharp sarcasm. Test sarcastic prompt.",
-                    },
-                    "serious": {
-                        "model": [f"{api_type}:dummy-serious"],
-                        "prompt": "You are {mynick}. You are friendly and informative. Test serious prompt.",
-                    },
-                    "unsafe": {
-                        "model": f"{api_type}:dummy-unsafe",
-                        "prompt": "You are {mynick} in unsafe mode. Test unsafe prompt.",
-                    },
-                },
-            },
-        },
-        "matrix": {
-            "homeserver": "https://matrix.org",
-            "user_id": "@testbot:matrix.org",
             "access_token": "test_token",
             "device_id": "TEST_DEVICE",
             "command": {

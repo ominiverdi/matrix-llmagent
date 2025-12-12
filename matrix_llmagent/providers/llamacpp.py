@@ -125,7 +125,7 @@ class LlamaCppClient(BaseAPIClient):
 
             # Convert to dict for consistent handling
             result = response.model_dump()
-            logger.debug(f"llama.cpp API call successful")
+            logger.debug("llama.cpp API call successful")
             return result
 
         except Exception as e:

@@ -214,7 +214,11 @@ def knowledge_base_tool_def(name: str, description: str) -> Tool:
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": f"Search query for {name}. Can be keywords, names, or natural language.",
+                    "description": (
+                        f"Search query for {name}. Use the EXACT terms from the user's question. "
+                        "Do NOT modify, correct, or assume what the user meant - search for what "
+                        "they actually wrote first."
+                    ),
                 }
             },
             "required": ["query"],
@@ -456,8 +460,8 @@ class LocalWebpageVisitor:
 
                     # Extract main content using readability
                     try:
-                        from readability import Document
                         from markdownify import markdownify as md
+                        from readability import Document
 
                         doc = Document(html)
                         title = doc.title()
@@ -487,7 +491,7 @@ class LocalWebpageVisitor:
 
                     except ImportError as e:
                         logger.error(f"Missing dependencies for local webpage visitor: {e}")
-                        return f"Error: Local webpage visitor requires readability-lxml and markdownify. Please install dependencies."
+                        return "Error: Local webpage visitor requires readability-lxml and markdownify. Please install dependencies."
                     except Exception as e:
                         logger.error(f"Error extracting content from {url}: {e}")
                         return f"Error extracting content: {e}"
@@ -1074,6 +1078,37 @@ class KnowledgeBaseSearchExecutor:
             self._pool = await asyncpg.create_pool(self.database_url, min_size=1, max_size=5)
         return self._pool
 
+    def _generate_query_variants(self, query: str) -> list[str]:
+        """Generate query variants to improve full-text search matching.
+
+        Returns a list of query variants to try, in order of preference:
+        1. Original query
+        2. Split on number+word boundaries (e.g., 'OSGeo4Server' -> 'OSGeo4 Server')
+        3. Split on CamelCase (e.g., 'GeoServer' -> 'Geo Server')
+        """
+        import re
+
+        variants = [query]
+
+        # Variant: split number + word (2+ letters)
+        # e.g., "OSGeo4Server" -> "OSGeo4 Server", but "OSGeo4W" stays intact
+        split_num = re.sub(r"([0-9])([a-zA-Z]{2,})", r"\1 \2", query)
+        if split_num != query and split_num not in variants:
+            variants.append(split_num)
+
+        # Variant: split CamelCase (lowercase followed by uppercase)
+        # e.g., "GeoServer" -> "Geo Server"
+        split_camel = re.sub(r"([a-z])([A-Z])", r"\1 \2", query)
+        if split_camel != query and split_camel not in variants:
+            variants.append(split_camel)
+
+        # Variant: combine both transformations
+        split_both = re.sub(r"([a-z])([A-Z])", r"\1 \2", split_num)
+        if split_both != query and split_both not in variants:
+            variants.append(split_both)
+
+        return variants
+
     async def execute(self, query: str) -> str:
         """Search the knowledge base and return formatted results."""
         try:
@@ -1086,24 +1121,36 @@ class KnowledgeBaseSearchExecutor:
         pages = []
         entities = []
 
+        # Generate query variants and try them in order until we get results
+        query_variants = self._generate_query_variants(query)
+        effective_query = query
+
         async with pool.acquire() as conn:  # type: ignore[union-attr]
-            # 1. Full-text search on page_extensions
-            pages = await conn.fetch(
-                """
-                SELECT page_title, url, resume, keywords,
-                       ts_rank(resume_tsv, websearch_to_tsquery('english', $1)) +
-                       ts_rank(keywords_tsv, websearch_to_tsquery('english', $1)) * 2 +
-                       ts_rank(page_title_tsv, websearch_to_tsquery('english', $1)) * 3 AS rank
-                FROM page_extensions
-                WHERE resume_tsv @@ websearch_to_tsquery('english', $1)
-                   OR keywords_tsv @@ websearch_to_tsquery('english', $1)
-                   OR page_title_tsv @@ websearch_to_tsquery('english', $1)
-                ORDER BY rank DESC
-                LIMIT $2
-                """,
-                query,
-                self.max_results,
-            )
+            # 1. Full-text search on page_extensions - try variants until results found
+            for variant in query_variants:
+                pages = await conn.fetch(
+                    """
+                    SELECT page_title, url, resume, keywords,
+                           ts_rank(resume_tsv, websearch_to_tsquery('english', $1)) +
+                           ts_rank(keywords_tsv, websearch_to_tsquery('english', $1)) * 2 +
+                           ts_rank(page_title_tsv, websearch_to_tsquery('english', $1)) * 3 AS rank
+                    FROM page_extensions
+                    WHERE resume_tsv @@ websearch_to_tsquery('english', $1)
+                       OR keywords_tsv @@ websearch_to_tsquery('english', $1)
+                       OR page_title_tsv @@ websearch_to_tsquery('english', $1)
+                    ORDER BY rank DESC
+                    LIMIT $2
+                    """,
+                    variant,
+                    self.max_results,
+                )
+                if pages:
+                    effective_query = variant
+                    if variant != query:
+                        logger.info(
+                            f"Knowledge base query variant matched: '{query}' -> '{variant}'"
+                        )
+                    break
 
             if pages:
                 results_parts.append(f"## Pages from {self.name}\n")
@@ -1116,7 +1163,7 @@ class KnowledgeBaseSearchExecutor:
                         resume = resume[:300] + "..."
                     results_parts.append(f"### [{title}]({url})\n{resume}\n")
 
-            # 2. Entity search using trigram similarity
+            # 2. Entity search using trigram similarity (fuzzy matching)
             entities = await conn.fetch(
                 """
                 SELECT entity_name, entity_type, url,
@@ -1131,6 +1178,70 @@ class KnowledgeBaseSearchExecutor:
                 self.max_entities,
             )
 
+            # 3. Fallback: if no pages found but entities matched, search for top entity
+            if not pages and entities:
+                top_entity = entities[0]["entity_name"]
+                if top_entity.lower() != query.lower():
+                    logger.info(f"Knowledge base fallback: searching for entity '{top_entity}'")
+                    pages = await conn.fetch(
+                        """
+                        SELECT page_title, url, resume, keywords,
+                               ts_rank(resume_tsv, websearch_to_tsquery('english', $1)) +
+                               ts_rank(keywords_tsv, websearch_to_tsquery('english', $1)) * 2 +
+                               ts_rank(page_title_tsv, websearch_to_tsquery('english', $1)) * 3 AS rank
+                        FROM page_extensions
+                        WHERE resume_tsv @@ websearch_to_tsquery('english', $1)
+                           OR keywords_tsv @@ websearch_to_tsquery('english', $1)
+                           OR page_title_tsv @@ websearch_to_tsquery('english', $1)
+                        ORDER BY rank DESC
+                        LIMIT $2
+                        """,
+                        top_entity,
+                        self.max_results,
+                    )
+                    if pages:
+                        effective_query = top_entity
+                        results_parts.append(f"## Pages from {self.name}\n")
+                        for page in pages:
+                            title = page["page_title"]
+                            url = page["url"]
+                            resume = page["resume"]
+                            if len(resume) > 300:
+                                resume = resume[:300] + "..."
+                            results_parts.append(f"### [{title}]({url})\n{resume}\n")
+
+            # 4. Chunk-based fallback: if few/no pages found, search raw content
+            if len(pages) < 2:
+                chunk_results = await conn.fetch(
+                    """
+                    SELECT p.title, p.url, LEFT(pc.chunk_text, 400) as excerpt,
+                           ts_rank(pc.tsv, websearch_to_tsquery('english', $1)) as rank
+                    FROM page_chunks pc
+                    JOIN pages p ON pc.page_id = p.id
+                    WHERE pc.tsv @@ websearch_to_tsquery('english', $1)
+                    ORDER BY rank DESC
+                    LIMIT $2
+                    """,
+                    effective_query,
+                    self.max_results,
+                )
+                if chunk_results:
+                    # Filter out pages we already have from page_extensions
+                    existing_urls = {p["url"] for p in pages} if pages else set()
+                    new_chunks = [c for c in chunk_results if c["url"] not in existing_urls]
+                    if new_chunks:
+                        logger.info(
+                            f"Knowledge base chunk fallback: {len(new_chunks)} additional pages"
+                        )
+                        results_parts.append(f"\n## Additional content from {self.name}\n")
+                        for chunk in new_chunks[:3]:  # Limit to 3 extra chunks
+                            title = chunk["title"]
+                            url = chunk["url"]
+                            excerpt = chunk["excerpt"]
+                            if len(excerpt) > 300:
+                                excerpt = excerpt[:300] + "..."
+                            results_parts.append(f"### [{title}]({url})\n{excerpt}\n")
+
             if entities:
                 results_parts.append("\n## Entities\n")
                 for ent in entities:
@@ -1144,7 +1255,7 @@ class KnowledgeBaseSearchExecutor:
                     else:
                         results_parts.append(f"- **{ent_name}** ({ent_type})")
 
-            # 3. Get relationships for matched entities
+            # 5. Get relationships for matched entities
             if entities:
                 entity_names = [e["entity_name"] for e in entities[:5]]
                 relationships = await conn.fetch(
@@ -1170,7 +1281,7 @@ class KnowledgeBaseSearchExecutor:
             return f"No results found in {self.name} for: {query}"
 
         logger.info(
-            f"Knowledge base search '{query}': {len(pages)} pages, {len(entities)} entities"
+            f"Knowledge base search '{effective_query}': {len(pages)} pages, {len(entities)} entities"
         )
         return "\n".join(results_parts)
 

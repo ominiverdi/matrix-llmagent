@@ -103,6 +103,19 @@ class MatrixLLMAgent:
         if mode_cfg.get("include_chapter_summary", True) and arc:
             prepended_context = await self.chronicle.get_chapter_context_messages(arc)
 
+        # Append knowledge base guidance if enabled
+        kb_config = self.config.get("tools", {}).get("knowledge_base", {})
+        if kb_config.get("enabled"):
+            kb_name = kb_config.get("name", "Knowledge Base")
+            system_prompt = system_prompt + (
+                f"\n\nIMPORTANT: You have access to a local knowledge base ({kb_name}) that contains "
+                "internal documentation, infrastructure details, and specialized information not available "
+                "on the public web. When searching this knowledge base, use the EXACT terms from the user's "
+                "question - do not assume typos or 'correct' unfamiliar terms. The knowledge base may contain "
+                "information about internal systems, servers, or projects that you don't recognize from your "
+                "training data. Trust the user's terminology and search for it verbatim first."
+            )
+
         actor = AgenticLLMActor(
             config=self.config,
             model=model or mode_cfg["model"],
