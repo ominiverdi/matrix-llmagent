@@ -196,6 +196,7 @@ Modes:
   !a <message>  - Agent mode - multi-turn research with tool chaining
   !p <message>  - Perplexity mode - web-enhanced AI responses
   !u <message>  - Unsafe mode - uncensored responses
+  !v <message>  - Verbose mode - get detailed responses instead of concise ones
   !h            - Show this help message
 
 Tools Available:
@@ -209,11 +210,13 @@ Tools Available:
     print("""
 Examples:
   uv run matrix-llmagent --message "what is QGIS?"
+  uv run matrix-llmagent --message "!v what is QGIS?"
   uv run matrix-llmagent --message "!d tell me a GIS joke"
   uv run matrix-llmagent --message "!a research FOSS4G 2024"
 
 Tips:
-  - Default mode is serious - no prefix needed for most questions
+  - Responses are concise by default (1 sentence) - say "tell me more" for details
+  - Use !v prefix when you need a comprehensive answer upfront
   - Use !a for complex research that needs multiple steps
   - Use !d when you want fun, sarcastic responses
 """)
@@ -239,25 +242,32 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
             _print_cli_help(agent.config)
             return
 
-        # Parse mode from message prefix
+        # Parse mode and verbose flag from message prefix
         mode = "serious"  # default
+        verbose = False
         clean_message = message
 
-        if message.startswith("!s ") or message.startswith("!S "):
+        # Check for verbose modifier first
+        if message.startswith("!v ") or message.startswith("!V "):
+            verbose = True
+            clean_message = message[3:]
+
+        # Check for mode prefix (after stripping verbose if present)
+        if clean_message.startswith("!s ") or clean_message.startswith("!S "):
             mode = "serious"
-            clean_message = message[3:]
-        elif message.startswith("!d ") or message.startswith("!D "):
+            clean_message = clean_message[3:]
+        elif clean_message.startswith("!d ") or clean_message.startswith("!D "):
             mode = "sarcastic"
-            clean_message = message[3:]
-        elif message.startswith("!u ") or message.startswith("!U "):
+            clean_message = clean_message[3:]
+        elif clean_message.startswith("!u ") or clean_message.startswith("!U "):
             mode = "unsafe"
-            clean_message = message[3:]
-        elif message.startswith("!a ") or message.startswith("!A "):
+            clean_message = clean_message[3:]
+        elif clean_message.startswith("!a ") or clean_message.startswith("!A "):
             mode = "agent"
-            clean_message = message[3:]
-        elif message.startswith("!p ") or message.startswith("!P "):
+            clean_message = clean_message[3:]
+        elif clean_message.startswith("!p ") or clean_message.startswith("!P "):
             mode = "perplexity"
-            clean_message = message[3:]
+            clean_message = clean_message[3:]
 
         # Get mode configuration
         command_config = agent.config.get("matrix", {}).get("command", {})
@@ -282,6 +292,14 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         # Build system prompt
         system_prompt = mode_cfg.get("system_prompt", "You are a helpful assistant.")
         system_prompt = system_prompt.replace("{mynick}", "CLI-Bot")
+
+        # Apply verbosity modifier to system prompt
+        if verbose:
+            system_prompt += " Provide comprehensive, detailed responses."
+        else:
+            system_prompt += (
+                " Keep responses to 1 sentence max. Users can say 'tell me more' for details."
+            )
 
         # Run actor
         response = await agent.run_actor(

@@ -93,11 +93,11 @@ class AgenticLLMActor:
         empty_response_retries = 0
 
         try:
-            for iteration in range(self.max_iterations * 2):
+            for iteration in range(self.max_iterations + 1):
                 if iteration > 0:
                     logger.info(f"Agent iteration {iteration + 1}/{self.max_iterations}")
                 if iteration >= self.max_iterations:
-                    logger.warn("Exceeding max iterations...")
+                    logger.warning("Reached max iterations, forcing final answer")
 
                 # Select model per iteration; last element repeats thereafter for lists
                 if vision_switched:
@@ -261,6 +261,15 @@ class AgenticLLMActor:
                     )
                     continue  # Continue to next iteration to let AI retry
                 elif result["type"] == "tool_use":
+                    # Check if we're past max iterations and model is not calling final_answer
+                    tool_names = [t["name"] for t in result["tools"]]
+                    if iteration >= self.max_iterations and "final_answer" not in tool_names:
+                        logger.warning(
+                            f"Model ignored tool_choice constraint at iteration {iteration}, "
+                            f"called {tool_names} instead of final_answer. Breaking loop."
+                        )
+                        break
+
                     # Add assistant's tool request to conversation
                     if response and isinstance(response, dict):
                         messages.append(client.format_assistant_message(response))

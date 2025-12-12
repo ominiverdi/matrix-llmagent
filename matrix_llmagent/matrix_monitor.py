@@ -15,6 +15,50 @@ logger = logging.getLogger(__name__)
 # Default threshold for collapsible messages (in characters)
 DEFAULT_LONG_MESSAGE_THRESHOLD = 300
 DEFAULT_SUMMARY_WORDS = 30
+# Threshold for paste service (when available) - messages longer than this get uploaded
+DEFAULT_PASTE_THRESHOLD = 2000
+
+
+# TODO: Implement when paste.osgeo.org is available
+# async def _upload_to_paste_service(text: str, paste_url: str) -> str | None:
+#     """Upload long text to paste service and return the URL.
+#
+#     Args:
+#         text: Text content to upload
+#         paste_url: Base URL of paste service (e.g., "https://paste.osgeo.org")
+#
+#     Returns:
+#         URL to the paste, or None if upload failed
+#
+#     Example integration in handle_command():
+#         paste_config = self.config.get("behavior", {}).get("paste_service", {})
+#         if paste_config.get("enabled") and len(response) > paste_config.get("threshold", 2000):
+#             paste_url = await _upload_to_paste_service(response, paste_config["url"])
+#             if paste_url:
+#                 summary = _truncate_to_words(response, 50)
+#                 response = f"{summary}\n\nFull response: {paste_url}"
+#
+#     Config example:
+#         "behavior": {
+#             "paste_service": {
+#                 "enabled": true,
+#                 "url": "https://paste.osgeo.org",
+#                 "threshold": 2000
+#             }
+#         }
+#     """
+#     import aiohttp
+#     try:
+#         async with aiohttp.ClientSession() as session:
+#             # Assuming 0x0.st-compatible API
+#             data = aiohttp.FormData()
+#             data.add_field('file', text, filename='response.txt', content_type='text/plain')
+#             async with session.post(paste_url, data=data) as resp:
+#                 if resp.status == 200:
+#                     return (await resp.text()).strip()
+#     except Exception as e:
+#         logger.warning(f"Failed to upload to paste service: {e}")
+#     return None
 
 
 def _truncate_to_words(text: str, max_words: int = DEFAULT_SUMMARY_WORDS) -> str:
@@ -209,10 +253,12 @@ class MatrixMonitor:
             return
 
         # Parse command mode
-        mode = self.determine_mode(clean_message)
+        mode, verbose = self.determine_mode(clean_message)
 
         # Strip mode prefix from message after determining mode
         mode_prefixes = [
+            r"!v\s+",
+            r"!V\s+",
             r"!s\s+",
             r"!S\s+",
             r"!d\s+",
@@ -250,6 +296,14 @@ class MatrixMonitor:
         if "{mynick}" in system_prompt:
             system_prompt = system_prompt.replace("{mynick}", bot_name)
 
+        # Apply verbosity modifier to system prompt
+        if verbose:
+            system_prompt += " Provide comprehensive, detailed responses."
+        else:
+            system_prompt += (
+                " Keep responses to 1 sentence max. Users can say 'tell me more' for details."
+            )
+
         # Run actor
         try:
             response = await self.agent.run_actor(
@@ -285,29 +339,37 @@ class MatrixMonitor:
             logger.error(f"Error processing command: {e}")
             await self.client.send_message(room_id, f"❌ Error: {str(e)}")
 
-    def determine_mode(self, message: str) -> str:
+    def determine_mode(self, message: str) -> tuple[str, bool]:
         """Determine which mode to use based on message.
 
         Args:
             message: Message text
 
         Returns:
-            Mode name (e.g., 'serious', 'sarcastic')
+            Tuple of (mode_name, verbose_flag)
         """
+        # Check for verbose modifier first
+        verbose = message.startswith("!v ") or message.startswith("!V ")
+
+        # Strip verbose prefix if present for further mode detection
+        check_msg = message
+        if verbose:
+            check_msg = message[3:]  # Remove "!v "
+
         # Check for explicit mode commands
-        if message.startswith("!s ") or message.startswith("!S "):
-            return "serious"
-        elif message.startswith("!d ") or message.startswith("!D "):
-            return "sarcastic"
-        elif message.startswith("!u ") or message.startswith("!U "):
-            return "unsafe"
-        elif message.startswith("!a ") or message.startswith("!A "):
-            return "agent"
-        elif message.startswith("!p ") or message.startswith("!P "):
-            return "perplexity"
+        if check_msg.startswith("!s ") or check_msg.startswith("!S "):
+            return "serious", verbose
+        elif check_msg.startswith("!d ") or check_msg.startswith("!D "):
+            return "sarcastic", verbose
+        elif check_msg.startswith("!u ") or check_msg.startswith("!U "):
+            return "unsafe", verbose
+        elif check_msg.startswith("!a ") or check_msg.startswith("!A "):
+            return "agent", verbose
+        elif check_msg.startswith("!p ") or check_msg.startswith("!P "):
+            return "perplexity", verbose
 
         # Use default or classifier
-        return self.command_config.get("default_mode", "serious")
+        return self.command_config.get("default_mode", "serious"), verbose
 
     async def _send_help(self, room_id: str) -> None:
         """Send help message with available commands."""
@@ -324,6 +386,7 @@ class MatrixMonitor:
 - `!a <message>` - Agent mode - multi-turn research with tool chaining
 - `!p <message>` - Perplexity mode - web-enhanced AI responses
 - `!u <message>` - Unsafe mode - uncensored responses
+- `!v <message>` - Verbose mode - get detailed responses instead of concise ones
 - `!h` - Show this help message
 
 **Tools Available:**
@@ -339,12 +402,14 @@ class MatrixMonitor:
 **Examples:**
 ```
 llm-assistant: what is QGIS?
+llm-assistant: !v what is QGIS?
 llm-assistant: !d tell me a GIS joke
 llm-assistant: !a research FOSS4G 2024
 ```
 
 **Tips:**
-- Default mode is serious - no prefix needed for most questions
+- Responses are concise by default (1 sentence) - say "tell me more" for details
+- Use `!v` prefix when you need a comprehensive answer upfront
 - Use `!a` for complex research that needs multiple steps
 - Use `!d` when you want fun, sarcastic responses"""
 
