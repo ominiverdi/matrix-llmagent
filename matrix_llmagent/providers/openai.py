@@ -138,6 +138,15 @@ class BaseOpenAIClient(BaseAPIClient):
             "messages": messages,
         }
 
+        # Handle streaming configuration (default to False for OpenRouter with tools)
+        stream_enabled = self.config.get("stream", False)
+        if tools and stream_enabled:
+            self.logger.warning(
+                f"{self.provider_name}: Disabling streaming because tools are present"
+            )
+            stream_enabled = False
+        kwargs["stream"] = stream_enabled
+
         if modalities:
             kwargs["modalities"] = modalities
 
