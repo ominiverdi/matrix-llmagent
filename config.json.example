@@ -24,10 +24,51 @@
             "model": "sonar-pro",
         },
         "llamacpp": {
-            "_comment": "Local llama.cpp server with OpenAI-compatible API. Start with: ./llama-server -m model.gguf --port 8080",
+            "_comment": "Local llama.cpp server (default, port 8080). Start with: ./llama-server -m model.gguf --port 8080 --jinja",
             "base_url": "http://localhost:8080/v1",
             "key": "not-needed",
             "max_tokens": 2048,
+        },
+        "llamacpp2": {
+            "_comment": "Model comparison slot 2 (port 8081). Use !2 prefix to test.",
+            "base_url": "http://localhost:8081/v1",
+            "key": "not-needed",
+            "max_tokens": 2048,
+        },
+        "llamacpp3": {
+            "_comment": "Model comparison slot 3 (port 8082). Use !3 prefix to test.",
+            "base_url": "http://localhost:8082/v1",
+            "key": "not-needed",
+            "max_tokens": 2048,
+            "strict_alternation": true,
+            "_strict_alternation_note": "Enable for Mistral3 family (Ministral, Devstral) - merges consecutive same-role messages"
+        },
+        "llamacpp4": {
+            "_comment": "Model comparison slot 4 (port 8083). Use !4 prefix to test.",
+            "base_url": "http://localhost:8083/v1",
+            "key": "not-needed",
+            "max_tokens": 2048,
+            "strict_alternation": true
+        },
+        "llamacpp5": {
+            "_comment": "Model comparison slot 5 (port 8084). Use !5 prefix to test.",
+            "base_url": "http://localhost:8084/v1",
+            "key": "not-needed",
+            "max_tokens": 2048,
+            "strict_alternation": true
+        },
+        "llamacpp6": {
+            "_comment": "Model comparison slot 6 (port 8085). Use !6 prefix to test.",
+            "base_url": "http://localhost:8085/v1",
+            "key": "not-needed",
+            "max_tokens": 2048,
+            "strict_alternation": true
+        },
+        "llamacpp7": {
+            "_comment": "Model comparison slot 7 (port 8086). Use !7 prefix to test.",
+            "base_url": "http://localhost:8086/v1",
+            "key": "not-needed",
+            "max_tokens": 2048
         },
     },
     "router": {"refusal_fallback_model": "openrouter:z-ai/glm-4.6#z-ai"},
@@ -133,6 +174,36 @@
                 "perplexity": {
                     "model": "perplexity:sonar-pro",
                     "system_prompt": "You are {mynick}. Use Perplexity's research capabilities to answer questions.",
+                },
+                "serious2": {
+                    "_comment": "Model comparison slot 2 - inherits system_prompt from serious mode",
+                    "model": "llamacpp2:hermes-3-8b",
+                    "slot_label": "hermes-3-8b",
+                },
+                "serious3": {
+                    "_comment": "Model comparison slot 3 - inherits system_prompt from serious mode",
+                    "model": "llamacpp3:ministral-8b",
+                    "slot_label": "ministral-8b",
+                },
+                "serious4": {
+                    "_comment": "Model comparison slot 4 - inherits system_prompt from serious mode",
+                    "model": "llamacpp4:devstral-24b",
+                    "slot_label": "devstral-24b",
+                },
+                "serious5": {
+                    "_comment": "Model comparison slot 5 - mini model for speed testing",
+                    "model": "llamacpp5:ministral-3b-q4",
+                    "slot_label": "ministral-3b-q4",
+                },
+                "serious6": {
+                    "_comment": "Model comparison slot 6 - mini model, better quality",
+                    "model": "llamacpp6:ministral-3b-q5",
+                    "slot_label": "ministral-3b-q5",
+                },
+                "serious7": {
+                    "_comment": "Model comparison slot 7 - small Qwen for comparison",
+                    "model": "llamacpp7:qwen3-4b",
+                    "slot_label": "qwen3-4b",
                 },
             },
             "mode_classifier": {

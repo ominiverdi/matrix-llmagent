@@ -1,6 +1,6 @@
 """Tests for main application functionality."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -240,3 +240,122 @@ class TestCLIMode:
                 mock_exit.assert_called_with(1)  # Just check it was called with 1, not once
                 print_calls = [call[0][0] for call in mock_print.call_args_list]
                 assert any("Config file not found" in call for call in print_calls)
+
+
+class TestModeShortcutParsing:
+    """Test mode shortcut parsing for model comparison slots."""
+
+    def test_determine_mode_numbered_slots(self, temp_config_file):
+        """Test that !2, !3, !4 shortcuts map to serious2, serious3, serious4 modes."""
+        agent = MatrixLLMAgent(temp_config_file)
+        monitor = agent.matrix_monitor
+
+        # Test !2 -> serious2
+        mode, verbose = monitor.determine_mode("!2 what is osgeo?")
+        assert mode == "serious2"
+        assert not verbose
+
+        # Test !3 -> serious3
+        mode, verbose = monitor.determine_mode("!3 what is osgeo?")
+        assert mode == "serious3"
+        assert not verbose
+
+        # Test !4 -> serious4
+        mode, verbose = monitor.determine_mode("!4 what is osgeo?")
+        assert mode == "serious4"
+        assert not verbose
+
+    def test_determine_mode_standard_shortcuts(self, temp_config_file):
+        """Test that standard shortcuts still work correctly."""
+        agent = MatrixLLMAgent(temp_config_file)
+        monitor = agent.matrix_monitor
+
+        # Test existing shortcuts
+        mode, verbose = monitor.determine_mode("!s test")
+        assert mode == "serious"
+
+        mode, verbose = monitor.determine_mode("!d test")
+        assert mode == "sarcastic"
+
+        mode, verbose = monitor.determine_mode("!u test")
+        assert mode == "unsafe"
+
+        mode, verbose = monitor.determine_mode("!a test")
+        assert mode == "agent"
+
+        mode, verbose = monitor.determine_mode("!p test")
+        assert mode == "perplexity"
+
+    def test_determine_mode_verbose_with_numbered_slot(self, temp_config_file):
+        """Test verbose modifier with numbered slots."""
+        agent = MatrixLLMAgent(temp_config_file)
+        monitor = agent.matrix_monitor
+
+        # Test !v !2 -> serious2 with verbose
+        mode, verbose = monitor.determine_mode("!v !2 what is osgeo?")
+        assert mode == "serious2"
+        assert verbose
+
+    def test_determine_mode_default_mode(self, temp_config_file):
+        """Test that messages without prefix use default mode."""
+        agent = MatrixLLMAgent(temp_config_file)
+        monitor = agent.matrix_monitor
+
+        mode, verbose = monitor.determine_mode("what is osgeo?")
+        assert mode == "serious"  # Default mode
+        assert not verbose
+
+
+class TestModeInheritance:
+    """Test mode configuration inheritance for numbered slots."""
+
+    def test_serious2_inherits_system_prompt(self, temp_config_file):
+        """Test that serious2 inherits system_prompt from serious when not specified."""
+        agent = MatrixLLMAgent(temp_config_file)
+        command_config = agent.config.get("matrix", {}).get("command", {})
+        modes = command_config.get("modes", {})
+
+        # Get base serious config
+        serious_cfg = modes.get("serious", {})
+        assert "system_prompt" in serious_cfg
+
+        # Get serious2 config (may not have system_prompt)
+        serious2_cfg = modes.get("serious2", {})
+
+        # Simulate inheritance logic from matrix_monitor.py
+        if "system_prompt" not in serious2_cfg:
+            merged_cfg = {**serious_cfg, **serious2_cfg}
+            assert "system_prompt" in merged_cfg
+            assert merged_cfg["system_prompt"] == serious_cfg["system_prompt"]
+
+
+class TestMultiProviderRouting:
+    """Test that ModelRouter correctly routes to different llamacpp providers."""
+
+    def test_router_creates_llamacpp2_client(self, temp_config_file):
+        """Test that ModelRouter creates correct client for llamacpp2."""
+        with patch("matrix_llmagent.providers.llamacpp._AsyncOpenAI") as MockOpenAI:
+            MockOpenAI.return_value = MagicMock()
+
+            agent = MatrixLLMAgent(temp_config_file)
+
+            # Get client for llamacpp2
+            client = agent.model_router.client_for("llamacpp2")
+
+            # Verify it was created with correct provider key
+            assert client._provider_key == "llamacpp2"
+            assert client.config["base_url"] == "http://localhost:8081/v1"
+
+    def test_router_creates_llamacpp3_client(self, temp_config_file):
+        """Test that ModelRouter creates correct client for llamacpp3."""
+        with patch("matrix_llmagent.providers.llamacpp._AsyncOpenAI") as MockOpenAI:
+            MockOpenAI.return_value = MagicMock()
+
+            agent = MatrixLLMAgent(temp_config_file)
+
+            # Get client for llamacpp3
+            client = agent.model_router.client_for("llamacpp3")
+
+            # Verify it was created with correct provider key
+            assert client._provider_key == "llamacpp3"
+            assert client.config["base_url"] == "http://localhost:8082/v1"

@@ -17,6 +17,54 @@ except Exception:  # pragma: no cover - handled at runtime
     _AsyncOpenAI = None  # type: ignore
 
 
+def _normalize_messages(messages: list[dict]) -> list[dict]:
+    """Merge consecutive messages with the same role.
+
+    Some models (Mistral3 family) require strict user/assistant alternation.
+    This function merges consecutive same-role messages to satisfy that constraint.
+
+    Args:
+        messages: List of message dicts with 'role' and 'content'
+
+    Returns:
+        Normalized list with no consecutive same-role messages
+    """
+    if not messages:
+        return messages
+
+    normalized = []
+    for msg in messages:
+        role = msg.get("role")
+        content = msg.get("content", "")
+
+        # Handle tool messages specially - they should follow assistant with tool_calls
+        if role == "tool":
+            normalized.append(msg)
+            continue
+
+        # Handle assistant messages with tool_calls - don't merge these
+        if role == "assistant" and msg.get("tool_calls"):
+            normalized.append(msg)
+            continue
+
+        # Check if we can merge with previous message
+        if normalized and normalized[-1].get("role") == role:
+            # Skip merging if previous message has tool_calls
+            if normalized[-1].get("tool_calls"):
+                normalized.append(msg)
+            else:
+                # Merge content with newline separator
+                prev_content = normalized[-1].get("content", "")
+                if prev_content and content:
+                    normalized[-1]["content"] = f"{prev_content}\n\n{content}"
+                elif content:
+                    normalized[-1]["content"] = content
+        else:
+            normalized.append(dict(msg))  # Copy to avoid mutating original
+
+    return normalized
+
+
 class LlamaCppClient(BaseAPIClient):
     """llama.cpp API client using OpenAI-compatible API.
 
@@ -25,12 +73,21 @@ class LlamaCppClient(BaseAPIClient):
 
     Example llama.cpp server command:
         ./llama-server -m model.gguf --port 8080
+
+    Supports multiple instances via provider_key parameter:
+        - "llamacpp" -> reads from providers.llamacpp (default, port 8080)
+        - "llamacpp2" -> reads from providers.llamacpp2 (port 8081)
+        - "llamacpp3" -> reads from providers.llamacpp3 (port 8082)
+        - etc.
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], provider_key: str = "llamacpp"):
         providers = config.get("providers", {}) if isinstance(config, dict) else {}
-        cfg = providers.get("llamacpp", {})
+        cfg = providers.get(provider_key, {})
         super().__init__(cfg)
+
+        # Store provider key for error messages
+        self._provider_key = provider_key
 
         if _AsyncOpenAI is None:
             raise RuntimeError(
@@ -41,12 +98,19 @@ class LlamaCppClient(BaseAPIClient):
         base_url = self.config.get("base_url", "http://localhost:8080/v1")
         api_key = self.config.get("key", "not-needed")  # llama.cpp doesn't require auth by default
 
+        # Strict alternation mode for Mistral3 family models
+        # When enabled, merges consecutive same-role messages before sending
+        self._strict_alternation = self.config.get("strict_alternation", False)
+
         self._client = _AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
         )
 
-        logger.info(f"LlamaCpp client initialized with base_url: {base_url}")
+        logger.info(
+            f"LlamaCpp client initialized with base_url: {base_url} (provider: {provider_key})"
+            + (", strict_alternation=True" if self._strict_alternation else "")
+        )
 
     def _convert_tools(self, tools: list[dict]) -> list[dict]:
         """Convert internal tool schema to OpenAI Chat Completion function tools.
@@ -99,6 +163,10 @@ class LlamaCppClient(BaseAPIClient):
         # Build messages array with system prompt
         messages = [{"role": "system", "content": system_prompt}] + context
 
+        # Apply strict alternation normalization if enabled (for Mistral3 family)
+        if self._strict_alternation:
+            messages = _normalize_messages(messages)
+
         # Prepare request parameters
         request_params: dict[str, Any] = {
             "model": model,  # llama.cpp ignores this, uses loaded model
@@ -129,8 +197,14 @@ class LlamaCppClient(BaseAPIClient):
             return result
 
         except Exception as e:
+            error_msg = str(e)
+            # Make connection errors more user-friendly
+            if "Connection refused" in error_msg or "ConnectError" in error_msg:
+                slot_num = self._provider_key.replace("llamacpp", "") or "default"
+                logger.warning(f"llama.cpp server not available for {self._provider_key}")
+                return {"error": f"Model slot {slot_num} is not active at the moment, sorry."}
             logger.error(f"llama.cpp API error: {e}")
-            return {"error": str(e)}
+            return {"error": error_msg}
 
     def _extract_raw_text(self, response: dict) -> str:
         """Extract text content from llama.cpp response (OpenAI format)."""

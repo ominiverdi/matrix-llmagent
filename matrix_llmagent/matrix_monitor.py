@@ -269,16 +269,33 @@ class MatrixMonitor:
             r"!A\s+",
             r"!p\s+",
             r"!P\s+",
+            r"!2\s+",
+            r"!3\s+",
+            r"!4\s+",
+            r"!5\s+",
+            r"!6\s+",
+            r"!7\s+",
         ]
         for prefix in mode_prefixes:
             clean_message = re.sub(f"^{prefix}", "", clean_message)
 
         logger.info(f"Processing command from {sender} in {room_id}, mode: {mode}")
 
-        # Get mode configuration
-        mode_cfg = self.command_config.get("modes", {}).get(mode, {})
+        # Get mode configuration with inheritance for numbered slots
+        modes = self.command_config.get("modes", {})
+        mode_cfg = modes.get(mode, {})
+
+        # Inherit from base mode if this is a numbered slot (e.g., serious2 inherits from serious)
+        if mode.startswith("serious") and mode != "serious":
+            base_cfg = modes.get("serious", {})
+            # Merge: base config first, then mode-specific overrides
+            mode_cfg = {**base_cfg, **mode_cfg}
+
         if not mode_cfg:
-            await self.client.send_message(room_id, "❌ Unknown command mode")
+            await self.client.send_message(room_id, "Unknown command mode")
+            return
+        if not mode_cfg.get("model"):
+            await self.client.send_message(room_id, f"Mode '{mode}' is not configured")
             return
 
         # Build context from chat history
@@ -314,6 +331,11 @@ class MatrixMonitor:
             )
 
             if response:
+                # Add slot label prefix if configured (for model comparison)
+                slot_label = mode_cfg.get("slot_label")
+                if slot_label:
+                    response = f"[{slot_label}] {response}"
+
                 # Get long message threshold from config
                 behavior_config = self.config.get("behavior", {})
                 threshold = behavior_config.get(
@@ -368,6 +390,20 @@ class MatrixMonitor:
         elif check_msg.startswith("!p ") or check_msg.startswith("!P "):
             return "perplexity", verbose
 
+        # Check for numbered model slots (!2, !3, !4, etc.)
+        elif check_msg.startswith("!2 "):
+            return "serious2", verbose
+        elif check_msg.startswith("!3 "):
+            return "serious3", verbose
+        elif check_msg.startswith("!4 "):
+            return "serious4", verbose
+        elif check_msg.startswith("!5 "):
+            return "serious5", verbose
+        elif check_msg.startswith("!6 "):
+            return "serious6", verbose
+        elif check_msg.startswith("!7 "):
+            return "serious7", verbose
+
         # Use default or classifier
         return self.command_config.get("default_mode", "serious"), verbose
 
@@ -378,16 +414,41 @@ class MatrixMonitor:
         kb_config = tools_config.get("knowledge_base", {})
         kb_name = kb_config.get("name", "Knowledge Base") if kb_config.get("enabled") else None
 
-        help_text = """**Available Commands**
+        # Build model slots section dynamically from config
+        modes = self.command_config.get("modes", {})
+        model_slots_text = ""
+        for slot_num in ["2", "3", "4", "5", "6", "7"]:
+            mode_key = f"serious{slot_num}"
+            mode_cfg = modes.get(mode_key, {})
+            if mode_cfg:
+                slot_label = mode_cfg.get("slot_label", mode_cfg.get("model", "unknown"))
+                model_slots_text += f"\n- `!{slot_num} <message>` - {slot_label}"
+
+        if not model_slots_text:
+            model_slots_text = "\n- No model slots configured"
+
+        # Get default model info
+        default_mode = self.command_config.get("default_mode", "serious")
+        default_cfg = modes.get(default_mode, {})
+        default_model = default_cfg.get("model", "unknown")
+        if isinstance(default_model, list):
+            default_model = default_model[0] if default_model else "unknown"
+        # Extract just the model name part after the provider prefix
+        if ":" in str(default_model):
+            default_model = default_model.split(":")[-1]
+
+        help_text = f"""**Available Commands**
 
 **Modes:**
-- `!s <message>` - Serious mode (default) - thoughtful responses with web tools
+- `!s <message>` - Serious mode (default: {default_model})
 - `!d <message>` - Sarcastic mode - witty, humorous responses
 - `!a <message>` - Agent mode - multi-turn research with tool chaining
 - `!p <message>` - Perplexity mode - web-enhanced AI responses
 - `!u <message>` - Unsafe mode - uncensored responses
 - `!v <message>` - Verbose mode - get detailed responses instead of concise ones
 - `!h` - Show this help message
+
+**Model Comparison Slots:**{model_slots_text}
 
 **Tools Available:**
 - Web search and webpage visiting

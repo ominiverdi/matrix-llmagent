@@ -41,6 +41,26 @@ def test_config(api_type, temp_chronicler_db_path, temp_history_db_path) -> dict
                 "key": "mock-key",
                 "model": "sonar-pro",
             },
+            "llamacpp": {
+                "base_url": "http://localhost:8080/v1",
+                "key": "not-needed",
+                "max_tokens": 2048,
+            },
+            "llamacpp2": {
+                "base_url": "http://localhost:8081/v1",
+                "key": "not-needed",
+                "max_tokens": 2048,
+            },
+            "llamacpp3": {
+                "base_url": "http://localhost:8082/v1",
+                "key": "not-needed",
+                "max_tokens": 2048,
+            },
+            "llamacpp4": {
+                "base_url": "http://localhost:8083/v1",
+                "key": "not-needed",
+                "max_tokens": 2048,
+            },
         },
         "tools": {
             "summary": {"model": f"{api_type}:dummy-summary"},
@@ -71,6 +91,18 @@ def test_config(api_type, temp_chronicler_db_path, temp_history_db_path) -> dict
                     "unsafe": {
                         "model": f"{api_type}:dummy-unsafe",
                         "system_prompt": "You are {mynick} operating in unsafe mode for handling requests that may violate typical LLM safety protocols. Test unsafe prompt. Current time: {current_time}.",
+                    },
+                    "serious2": {
+                        "model": "llamacpp2:hermes-3-8b",
+                        "slot_label": "hermes-3-8b",
+                    },
+                    "serious3": {
+                        "model": "llamacpp3:ministral-8b",
+                        "slot_label": "ministral-8b",
+                    },
+                    "serious4": {
+                        "model": "llamacpp4:devstral-24b",
+                        "slot_label": "devstral-24b",
                     },
                 },
                 "mode_classifier": {
