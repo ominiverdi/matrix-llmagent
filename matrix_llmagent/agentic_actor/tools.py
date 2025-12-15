@@ -17,8 +17,15 @@ from ..chronicler.tools import ChapterAppendExecutor, ChapterRenderExecutor, chr
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_USER_AGENT = "matrix-llmagent/1.0"
+
+
 async def fetch_image_b64(
-    session: aiohttp.ClientSession, url: str, max_size: int, timeout: int = 30
+    session: aiohttp.ClientSession,
+    url: str,
+    max_size: int,
+    timeout: int = 30,
+    user_agent: str = DEFAULT_USER_AGENT,
 ) -> tuple[str, str]:
     """
     Fetch an image from URL and return (content_type, base64_string).
@@ -27,7 +34,7 @@ async def fetch_image_b64(
     async with session.head(
         url,
         timeout=aiohttp.ClientTimeout(total=timeout),
-        headers={"User-Agent": "matrix-llmagent/1.0"},
+        headers={"User-Agent": user_agent},
     ) as head_response:
         content_type = head_response.headers.get("content-type", "").lower()
         if not content_type.startswith("image/"):
@@ -36,7 +43,7 @@ async def fetch_image_b64(
     async with session.get(
         url,
         timeout=aiohttp.ClientTimeout(total=timeout),
-        headers={"User-Agent": "matrix-llmagent/1.0"},
+        headers={"User-Agent": user_agent},
         max_line_size=8190 * 2,
         max_field_size=8190 * 2,
     ) as response:
@@ -469,15 +476,83 @@ class WebSearchExecutor:
         return "## Search Results\n\n" + "\n\n".join(formatted_results)
 
 
+class GoogleSearchExecutor:
+    """Async Google Custom Search API executor.
+
+    Requires a Google API key and Custom Search Engine ID (cx).
+    Get credentials at: https://developers.google.com/custom-search/v1/overview
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        cx: str,
+        max_results: int = 10,
+        max_calls_per_second: float = 1.0,
+    ):
+        self.api_key = api_key
+        self.cx = cx
+        self.max_results = max_results
+        self.rate_limiter = RateLimiter(max_calls_per_second)
+
+    async def execute(self, query: str) -> str:
+        """Execute Google search and return formatted results."""
+        await self.rate_limiter.wait_if_needed()
+
+        url = "https://www.googleapis.com/customsearch/v1"
+        params = {
+            "key": self.api_key,
+            "cx": self.cx,
+            "q": query,
+            "num": min(self.max_results, 10),  # Google API max is 10 per request
+        }
+
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(url, params=params) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+
+                    items = data.get("items", [])
+                    logger.info(f"Google searching '{query}': {len(items)} results")
+
+                    if not items:
+                        return "No search results found. Try a different query."
+
+                    # Format results as markdown
+                    formatted_results = []
+                    for item in items:
+                        title = item.get("title", "No title")
+                        link = item.get("link", "#")
+                        snippet = item.get("snippet", "No description")
+                        formatted_results.append(f"[{title}]({link})\n{snippet}")
+
+                    return "## Search Results\n\n" + "\n\n".join(formatted_results)
+
+            except aiohttp.ClientResponseError as e:
+                logger.error(f"Google search failed: {e}")
+                if e.status == 403:
+                    return "Search failed: API quota exceeded or invalid credentials"
+                return f"Search failed: {e}"
+            except Exception as e:
+                logger.error(f"Google search failed: {e}")
+                return f"Search failed: {e}"
+
+
 class JinaSearchExecutor:
     """Async Jina.ai search executor."""
 
     def __init__(
-        self, max_results: int = 10, max_calls_per_second: float = 1.0, api_key: str | None = None
+        self,
+        max_results: int = 10,
+        max_calls_per_second: float = 1.0,
+        api_key: str | None = None,
+        user_agent: str = DEFAULT_USER_AGENT,
     ):
         self.max_results = max_results
         self.rate_limiter = RateLimiter(max_calls_per_second)
         self.api_key = api_key
+        self.user_agent = user_agent
 
     async def execute(self, query: str, **kwargs) -> str:
         """Execute Jina search and return formatted results."""
@@ -492,7 +567,7 @@ class JinaSearchExecutor:
 
         url = "https://s.jina.ai/?q=" + query
         headers = {
-            "User-Agent": "matrix-llmagent/1.0",
+            "User-Agent": self.user_agent,
             "X-Respond-With": "no-content",
             "Accept": "text/plain",
         }
@@ -644,12 +719,14 @@ class WebpageVisitorExecutor:
         max_image_size: int = 3_500_000,
         progress_callback: Any | None = None,
         api_key: str | None = None,
+        user_agent: str = DEFAULT_USER_AGENT,
     ):
         self.max_content_length = max_content_length
         self.timeout = timeout
         self.max_image_size = max_image_size  # 5MB default limit post base64 encode
         self.progress_callback = progress_callback
         self.api_key = api_key
+        self.user_agent = user_agent
 
     async def execute(self, url: str) -> str | list[dict]:
         """Visit webpage and return content as markdown, or image data for images."""
@@ -664,14 +741,14 @@ class WebpageVisitorExecutor:
             async with session.head(
                 url,
                 timeout=aiohttp.ClientTimeout(total=self.timeout),
-                headers={"User-Agent": "matrix-llmagent/1.0"},
+                headers={"User-Agent": self.user_agent},
             ) as head_response:
                 content_type = head_response.headers.get("content-type", "").lower()
 
                 if content_type.startswith("image/"):
                     try:
                         content_type, image_b64 = await fetch_image_b64(
-                            session, url, self.max_image_size, self.timeout
+                            session, url, self.max_image_size, self.timeout, self.user_agent
                         )
                         # Return Anthropic content blocks with image
                         return [
@@ -716,7 +793,7 @@ class WebpageVisitorExecutor:
                 await asyncio.sleep(delay)
 
             try:
-                headers = {"User-Agent": "matrix-llmagent/1.0"}
+                headers = {"User-Agent": self.user_agent}
                 if self.api_key:
                     headers["Authorization"] = f"Bearer {self.api_key}"
                 async with session.get(
@@ -1753,13 +1830,14 @@ def create_tool_executors(
     # Search provider config
     tools_config = config.get("tools", {}) if config else {}
     search_provider = tools_config.get("search_provider")  # None if not configured
+    user_agent = tools_config.get("user_agent") or DEFAULT_USER_AGENT
 
     # Create appropriate search executor based on provider
     # Set to None if disabled (empty string, "none", or "disabled")
     search_executor = None
     if search_provider and search_provider.lower() not in ("none", "disabled", "off", "false"):
         if search_provider == "jina":
-            search_executor = JinaSearchExecutor(api_key=jina_api_key)
+            search_executor = JinaSearchExecutor(api_key=jina_api_key, user_agent=user_agent)
         elif search_provider == "brave":
             brave_config = tools.get("brave", {})
             brave_api_key = brave_config.get("api_key")
@@ -1768,6 +1846,17 @@ def create_tool_executors(
                 search_executor = WebSearchExecutor(backend="brave")
             else:
                 search_executor = BraveSearchExecutor(api_key=brave_api_key)
+        elif search_provider == "google":
+            google_config = tools.get("google", {})
+            google_api_key = google_config.get("api_key")
+            google_cx = google_config.get("cx")
+            if not google_api_key or not google_cx:
+                logger.warning(
+                    "Google search configured but missing api_key or cx, falling back to ddgs"
+                )
+                search_executor = WebSearchExecutor(backend="auto")
+            else:
+                search_executor = GoogleSearchExecutor(api_key=google_api_key, cx=google_cx)
         else:
             if "jina" in search_provider:
                 raise ValueError(
@@ -1780,7 +1869,6 @@ def create_tool_executors(
 
     # Webpage visitor config
     webpage_visitor_type = tools_config.get("webpage_visitor", "local")
-    user_agent = tools_config.get("user_agent")
 
     if webpage_visitor_type == "local":
         webpage_visitor = LocalWebpageVisitor(
@@ -1790,7 +1878,7 @@ def create_tool_executors(
     else:
         # Default to Jina
         webpage_visitor = WebpageVisitorExecutor(
-            progress_callback=progress_callback, api_key=jina_api_key
+            progress_callback=progress_callback, api_key=jina_api_key, user_agent=user_agent
         )
         logger.info("Using Jina.ai webpage visitor")
 

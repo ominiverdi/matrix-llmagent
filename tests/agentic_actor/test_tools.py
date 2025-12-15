@@ -6,6 +6,7 @@ import aiohttp
 import pytest
 
 from matrix_llmagent.agentic_actor.tools import (
+    GoogleSearchExecutor,
     JinaSearchExecutor,
     LocalWebpageVisitor,
     PythonExecutorE2B,
@@ -65,6 +66,70 @@ class TestToolExecutors:
                 result = await executor.execute("no results query")
 
                 assert "No search results found" in result
+
+    @pytest.mark.asyncio
+    async def test_google_search_executor(self):
+        """Test Google search executor."""
+        executor = GoogleSearchExecutor(api_key="test-api-key", cx="test-cx", max_results=3)
+
+        mock_response_data = {
+            "items": [
+                {
+                    "title": "Google Result 1",
+                    "link": "https://example.com/g1",
+                    "snippet": "Google description 1",
+                },
+                {
+                    "title": "Google Result 2",
+                    "link": "https://example.com/g2",
+                    "snippet": "Google description 2",
+                },
+            ]
+        }
+
+        with patch("aiohttp.ClientSession") as mock_session_cls:
+            mock_session = AsyncMock()
+            mock_session_cls.return_value.__aenter__.return_value = mock_session
+
+            mock_response = AsyncMock()
+            mock_response.json.return_value = mock_response_data
+            mock_response.raise_for_status = MagicMock()
+
+            mock_get_ctx = AsyncMock()
+            mock_get_ctx.__aenter__.return_value = mock_response
+            mock_get_ctx.__aexit__.return_value = None
+
+            mock_session.get = MagicMock(return_value=mock_get_ctx)
+
+            result = await executor.execute("test query")
+
+            assert "## Search Results" in result
+            assert "Google Result 1" in result
+            assert "https://example.com/g1" in result
+            assert "Google description 1" in result
+
+    @pytest.mark.asyncio
+    async def test_google_search_no_results(self):
+        """Test Google search with no results."""
+        executor = GoogleSearchExecutor(api_key="test-api-key", cx="test-cx")
+
+        with patch("aiohttp.ClientSession") as mock_session_cls:
+            mock_session = AsyncMock()
+            mock_session_cls.return_value.__aenter__.return_value = mock_session
+
+            mock_response = AsyncMock()
+            mock_response.json.return_value = {"items": []}
+            mock_response.raise_for_status = MagicMock()
+
+            mock_get_ctx = AsyncMock()
+            mock_get_ctx.__aenter__.return_value = mock_response
+            mock_get_ctx.__aexit__.return_value = None
+
+            mock_session.get = MagicMock(return_value=mock_get_ctx)
+
+            result = await executor.execute("no results query")
+
+            assert "No search results found" in result
 
     @pytest.mark.asyncio
     async def test_jina_executor_extra_kwargs(self):

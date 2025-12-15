@@ -75,11 +75,16 @@
     "tools": {
         "e2b": {"api_key": "your-e2b-api-key-here"},
         "brave": {"api_key": "your-brave-api-key-here"},
+        "google": {
+            "_comment": "Google Custom Search API. Get credentials at https://developers.google.com/custom-search/v1/overview",
+            "api_key": "your-google-api-key-here",
+            "cx": "your-custom-search-engine-id-here"
+        },
         "jina": {
             "_comment": "You may optionally set the api_key key here (for 20rpm->500rpm NC use)"
         },
-        "search_provider": "wikipedia,google,bing,brave",
-        "_search_provider_note": "It is VERY RECOMMENDED to get a jina API key (mandatory) and then set search_provider to 'jina'",
+        "search_provider": "jina",
+        "_search_provider_note": "Options: 'jina' (recommended, best quality), 'google' (requires API key + cx), 'brave' (requires API key), 'ddgs' (DuckDuckGo, free), 'wikipedia' (free). Set to 'none' to disable web search.",
         "webpage_visitor": "local",
         "_webpage_visitor_note": "Options: 'local' (privacy-friendly, no API calls) or 'jina' (higher quality, requires external service). Default: 'local'",
         "user_agent": "Mozilla/5.0 (compatible; matrix-llmagent/1.0; +https://github.com/yourusername/matrix-llmagent)",

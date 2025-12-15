@@ -215,10 +215,11 @@ Unrestricted responses that bypass typical LLM safety filters. Use responsibly.
 Search the web and get top results with titles, URLs, and descriptions.
 
 **Supported Providers:**
-- **Wikipedia** - Free, no API key required
-- **DuckDuckGo** - Free, no API key required  
+- **Jina AI** - Requires API key, best quality ([get one](https://jina.ai/)) - **recommended**
+- **Google** - Requires API key + Custom Search Engine ID ([setup guide](https://developers.google.com/custom-search/v1/overview))
 - **Brave Search** - Requires API key ([get one](https://brave.com/search/api/))
-- **Jina AI** - Requires API key, best quality ([get one](https://jina.ai/))
+- **DuckDuckGo** - Free, no API key required (use `"ddgs"` or `"auto"`)
+- **Wikipedia** - Free, no API key required
 
 **Configuration:**
 ```json
@@ -228,12 +229,24 @@ Search the web and get top results with titles, URLs, and descriptions.
     "jina": {
       "api_key": "your-jina-api-key"
     },
+    "google": {
+      "api_key": "your-google-api-key",
+      "cx": "your-custom-search-engine-id"
+    },
     "brave": {
       "api_key": "your-brave-api-key"
     }
   }
 }
 ```
+
+**Google Custom Search Setup:**
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a project and enable the "Custom Search API"
+3. Create an API key in "Credentials"
+4. Go to [Programmable Search Engine](https://programmablesearchengine.google.com/) and create a search engine
+5. Copy the Search Engine ID (cx) from "Setup" > "Basic"
+6. Add both `api_key` and `cx` to your config
 
 **Disable web search entirely:**
 Remove `search_provider` from config or set it to `""`, `"none"`, or `"disabled"`. The `web_search` tool will not be offered to the agent.
@@ -470,6 +483,7 @@ Set to a very high value (e.g., `999999`) to effectively disable collapsing.
 | Tool | API Key Required | Cost | Setup |
 |------|------------------|------|-------|
 | `web_search` (Wikipedia/DDG) | ❌ No | Free | None |
+| `web_search` (Google) | ✅ Yes | Free tier (100/day) | [Google Custom Search](https://developers.google.com/custom-search/v1/overview) |
 | `web_search` (Brave) | ✅ Yes | Paid | [Brave API](https://brave.com/search/api/) |
 | `web_search` (Jina) | ✅ Yes | Free tier available | [Jina AI](https://jina.ai/) |
 | `visit_webpage` (local) | ❌ No | Free | Built-in (default) |
