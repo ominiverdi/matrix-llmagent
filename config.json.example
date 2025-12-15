@@ -126,8 +126,10 @@
         "progress": {"threshold_seconds": 10, "min_interval_seconds": 8},
     },
     "behavior": {
+        "collapsible_messages": false,
+        "_collapsible_messages_note": "Set to true to wrap long messages in <details> tags",
         "max_message_length": 300,
-        "_max_message_length_note": "Messages longer than this (in characters) will be wrapped in a collapsible <details> tag",
+        "_max_message_length_note": "Messages longer than this (in characters) will be wrapped in a collapsible <details> tag (if collapsible_messages is true)",
     },
     "chronicler": {
         "model": "anthropic:claude-haiku-4-5-20251001",

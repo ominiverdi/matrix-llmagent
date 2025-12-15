@@ -336,17 +336,21 @@ class MatrixMonitor:
                 if slot_label:
                     response = f"[{slot_label}] {response}"
 
-                # Get long message threshold from config
+                # Get collapsible message config
                 behavior_config = self.config.get("behavior", {})
-                threshold = behavior_config.get(
-                    "max_message_length", DEFAULT_LONG_MESSAGE_THRESHOLD
-                )
+                collapsible_enabled = behavior_config.get("collapsible_messages", False)
 
-                # Wrap long messages in collapsible <details> tag
-                plain_text, html_body = _wrap_long_message(response, threshold)
+                if collapsible_enabled:
+                    threshold = behavior_config.get(
+                        "max_message_length", DEFAULT_LONG_MESSAGE_THRESHOLD
+                    )
+                    # Wrap long messages in collapsible <details> tag
+                    plain_text, html_body = _wrap_long_message(response, threshold)
 
-                if html_body:
-                    await self.client.send_html_message(room_id, plain_text, html_body)
+                    if html_body:
+                        await self.client.send_html_message(room_id, plain_text, html_body)
+                    else:
+                        await self.client.send_message(room_id, response)
                 else:
                     await self.client.send_message(room_id, response)
 
