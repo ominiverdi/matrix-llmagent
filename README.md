@@ -10,15 +10,15 @@ A modern Python-based agentic LLM chatbot service for Matrix with persistent mem
 
 ## Features
 
-- **🟣 Matrix Protocol**: Native Matrix client with full room support
-- **🧠 Local LLMs**: llama.cpp support for local model inference
-- **🤖 AI Integrations**: Anthropic Claude, OpenAI, DeepSeek, any OpenRouter model, Perplexity AI
-- **🛠️ Agentic Capability**: Visit websites, view images, deep research, execute Python code, publish artifacts
-- **📚 Persistent Memory**: Chronicle system maintains continuous memory across conversations
-- **🎭 Multiple Modes**: Sarcastic, serious, unsafe, agent, and perplexity modes
-- **🎯 Proactive Interjecting**: Automatically joins relevant conversations
-- **⚡ Async Architecture**: Non-blocking message processing
-- **🔒 Rate Limiting**: Configurable rate limiting per user
+- **Matrix Protocol**: Native Matrix client with full room support
+- **Local LLMs**: llama.cpp support for local model inference
+- **AI Integrations**: Anthropic Claude, OpenAI, DeepSeek, any OpenRouter model, Perplexity AI
+- **Agentic Capability**: Visit websites, view images, deep research, execute Python code, publish artifacts
+- **Persistent Memory**: Chronicle system maintains continuous memory across conversations
+- **Multiple Modes**: Sarcastic, serious, unsafe, agent, and perplexity modes
+- **Proactive Interjecting**: Automatically joins relevant conversations
+- **Async Architecture**: Non-blocking message processing
+- **Rate Limiting**: Configurable rate limiting per user
 
 ## Installation
 
