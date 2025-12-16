@@ -302,7 +302,7 @@ Bot: [Fetches page locally, converts to Markdown, analyzes content]
      Python 3.13.1 is now available with improved performance...
 ```
 
-### 🐍 Python Code Execution (`execute_python`)
+### Python Code Execution (`execute_python`)
 Execute Python code in a secure **E2B sandbox** environment.
 
 **Features:**
