@@ -156,7 +156,7 @@ The webpage visitor is **enabled by default** in local mode (no setup needed):
 @bot: !d why do programmers prefer dark mode?
 ```
 
-## 🤖 Bot Modes
+## Bot Modes
 
 ### Help (`!h`)
 Show available commands, modes, and tools. Use this to discover what the bot can do.
@@ -213,11 +213,11 @@ Uses Perplexity AI for web-enhanced responses with real-time information.
 ### Unsafe Mode (`!u`)
 Unrestricted responses that bypass typical LLM safety filters. Use responsibly.
 
-## 🛠️ Tools & Capabilities
+## Tools & Capabilities
 
 **By default**, the bot has access to powerful tools in **serious mode** (no prefix needed). These same tools are available in agent mode (`!a`) for more complex multi-turn tasks:
 
-### 🌐 Web Search (`web_search`)
+### Web Search (`web_search`)
 Search the web and get top results with titles, URLs, and descriptions.
 
 **Supported Providers:**
@@ -334,11 +334,11 @@ export E2B_API_KEY="your-e2b-api-key"
 ```
 User: !a create a bar chart of top 5 programming languages
 Bot: [Executes matplotlib code in sandbox]
-     ✅ Generated plot showing Python, JavaScript, Java, C++, Go
+     Generated plot showing Python, JavaScript, Java, C++, Go
      [Returns plot data/description]
 ```
 
-### 📦 Artifact Sharing (`share_artifact`)
+### Artifact Sharing (`share_artifact`)
 Create shareable public links for scripts, reports, and data.
 
 **Configuration:**
@@ -358,7 +358,7 @@ Create shareable public links for scripts, reports, and data.
 - Publish detailed reports
 - Provide downloadable data files
 
-### 🎨 Image Generation (`generate_image`)
+### Image Generation (`generate_image`)
 Generate AI images using state-of-the-art models via OpenRouter.
 
 **Configuration:**
@@ -381,10 +381,10 @@ Generate AI images using state-of-the-art models via OpenRouter.
 ```
 User: !a generate an image of a futuristic city at sunset
 Bot: [Generates image using configured model]
-     ✅ Image generated: [URL to image]
+     Image generated: [URL to image]
 ```
 
-### 📚 Knowledge Base Search (`knowledge_base`)
+### Knowledge Base Search (`knowledge_base`)
 Search a custom PostgreSQL knowledge base with semantic extractions. Perfect for domain-specific Q&A using your own wiki or document corpus.
 
 **Features:**
@@ -436,34 +436,31 @@ Bot: [Searches knowledge_base for "strk"]
      OSGeo contributor involved in PostGIS and infrastructure projects...
 ```
 
-### 📊 Other Agent Tools
+### Other Agent Tools
 
 - **`progress_report`** - Send real-time progress updates during long operations
 - **`make_plan`** - Formulate research/execution strategy before acting
 - **`final_answer`** - Structured final response with thinking process
 - **Chronicle tools** - Access conversation history and memory
 
-### 📏 Collapsible Long Messages
+### Collapsible Long Messages
 
-Long bot responses are automatically wrapped in a collapsible `<details>` tag for Matrix clients that support HTML rendering. This keeps chat rooms tidy while preserving full content.
-
-**Behavior:**
-- Messages exceeding `max_message_length` (default: 300 characters) are collapsed
-- The preview shows the first ~30 words with "..." 
-- Users can expand to see the full response
+Long bot responses can optionally be wrapped in a collapsible `<details>` tag for Matrix clients that support HTML rendering.
 
 **Configuration:**
 ```json
 {
   "behavior": {
+    "collapsible_messages": true,
     "max_message_length": 300
   }
 }
 ```
 
-Set to a very high value (e.g., `999999`) to effectively disable collapsing.
+- `collapsible_messages`: Set to `true` to enable (default: `false`)
+- `max_message_length`: Character threshold for collapsing (default: 300)
 
-### 🔧 Tool Configuration
+### Tool Configuration
 
 **Enable/Disable Tools Per Mode:**
 ```json
@@ -488,23 +485,23 @@ Set to a very high value (e.g., `999999`) to effectively disable collapsing.
 **Tool Requirements:**
 | Tool | API Key Required | Cost | Setup |
 |------|------------------|------|-------|
-| `web_search` (Wikipedia/DDG) | ❌ No | Free | None |
-| `web_search` (Google) | ✅ Yes | Free tier (100/day) | [Google Custom Search](https://developers.google.com/custom-search/v1/overview) |
-| `web_search` (Brave) | ✅ Yes | Paid | [Brave API](https://brave.com/search/api/) |
-| `web_search` (Jina) | ✅ Yes | Free tier available | [Jina AI](https://jina.ai/) |
-| `visit_webpage` (local) | ❌ No | Free | Built-in (default) |
-| `visit_webpage` (jina) | ⚠️ Optional | Free tier / Paid | [Jina API](https://jina.ai/) for higher quality |
-| `execute_python` | ✅ Yes | Paid | [E2B](https://e2b.dev) |
-| `generate_image` | ✅ Yes | Paid | OpenRouter account |
-| `share_artifact` | ❌ No | Free | Configure local path + URL |
-| `knowledge_base` | ❌ No | Free | PostgreSQL database ([schema](docs/KNOWLEDGE_BASE.md)) |
+| `web_search` (Wikipedia/DDG) | No | Free | None |
+| `web_search` (Google) | Yes | Free tier (100/day) | [Google Custom Search](https://developers.google.com/custom-search/v1/overview) |
+| `web_search` (Brave) | Yes | Paid | [Brave API](https://brave.com/search/api/) |
+| `web_search` (Jina) | Yes | Free tier available | [Jina AI](https://jina.ai/) |
+| `visit_webpage` (local) | No | Free | Built-in (default) |
+| `visit_webpage` (jina) | Optional | Free tier / Paid | [Jina API](https://jina.ai/) for higher quality |
+| `execute_python` | Yes | Paid | [E2B](https://e2b.dev) |
+| `generate_image` | Yes | Paid | OpenRouter account |
+| `share_artifact` | No | Free | Configure local path + URL |
+| `knowledge_base` | No | Free | PostgreSQL database ([schema](docs/KNOWLEDGE_BASE.md)) |
 
 **Note:** For llama.cpp models to support tools, start the server with `--jinja` flag:
 ```bash
 ./llama-server -m model.gguf --port 8080 --jinja
 ```
 
-### 🎯 Multi-Turn Agent Flow
+### Multi-Turn Agent Flow
 
 When you invoke agent mode, the bot operates in a **multi-turn loop**:
 
