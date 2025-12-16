@@ -2,6 +2,12 @@
 
 A modern Python-based agentic LLM chatbot service for Matrix with persistent memory, tool use, and local model support.
 
+---
+
+*Forked from [pasky/irssi-llmagent](https://github.com/pasky/irssi-llmagent) - adapted for Matrix protocol*
+
+---
+
 ## Features
 
 - **🟣 Matrix Protocol**: Native Matrix client with full room support
