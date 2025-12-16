@@ -6,8 +6,10 @@ import logging
 import re
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from ddgs import DDGS
@@ -204,6 +206,21 @@ TOOLS: list[Tool] = [
             "required": ["prompt"],
         },
         "persist": "artifact",
+    },
+    {
+        "name": "get_time",
+        "description": "Get the current time in a specified timezone. Use this for any time-related questions.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "timezone": {
+                    "type": "string",
+                    "description": "IANA timezone name (e.g., 'America/Los_Angeles', 'Europe/London', 'Asia/Tokyo'). If not specified, returns server local time.",
+                },
+            },
+            "required": [],
+        },
+        "persist": "none",
     },
 ]
 
@@ -985,6 +1002,40 @@ class MakePlanExecutor:
         """Confirm plan receipt."""
         logger.info(f"Plan formulated: {plan[:200]}...")
         return "OK, follow this plan"
+
+
+class GetTimeExecutor:
+    """Executor for getting current time in a specified timezone."""
+
+    async def execute(self, timezone: str | None = None) -> str:
+        """Get current time in the specified timezone.
+
+        Args:
+            timezone: IANA timezone name (e.g., 'America/Los_Angeles').
+                     If None, returns server local time.
+
+        Returns:
+            Formatted time string with date and timezone info.
+        """
+        try:
+            if timezone:
+                tz = ZoneInfo(timezone)
+                now = datetime.now(tz)
+                tz_name = timezone
+            else:
+                # Server local time
+                now = datetime.now().astimezone()
+                tz_name = str(now.tzinfo)
+
+            # Format: "Tuesday, December 17, 2025 at 4:15:32 AM (America/Los_Angeles)"
+            formatted = now.strftime("%A, %B %d, %Y at %I:%M:%S %p")
+            result = f"{formatted} ({tz_name})"
+            logger.info(f"Time requested for {tz_name}: {result}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get time for timezone '{timezone}': {e}")
+            return f"Error: Invalid timezone '{timezone}'. Use IANA format like 'America/Los_Angeles', 'Europe/London', 'Asia/Tokyo'."
 
 
 class ArtifactStore:
@@ -1894,6 +1945,7 @@ def create_tool_executors(
         ),
         "final_answer": FinalAnswerExecutor(),
         "make_plan": MakePlanExecutor(),
+        "get_time": GetTimeExecutor(),
         "share_artifact": ShareArtifactExecutor.from_config(config or {}),
         "chronicle_append": ChapterAppendExecutor(agent=agent, arc=arc),
         "chronicle_read": ChapterRenderExecutor(chronicle=agent.chronicle, arc=arc),
