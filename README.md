@@ -438,6 +438,7 @@ Bot: [Searches knowledge_base for "strk"]
 
 ### Other Agent Tools
 
+- **`get_time`** - Get current time in any timezone (e.g., "America/Los_Angeles", "Europe/London")
 - **`progress_report`** - Send real-time progress updates during long operations
 - **`make_plan`** - Formulate research/execution strategy before acting
 - **`final_answer`** - Structured final response with thinking process
