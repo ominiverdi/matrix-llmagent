@@ -596,7 +596,7 @@ llm-assistant: !l mercator projection
             image_path = get_best_image_path(result)
             element_label = result.get("element_label", "Element")
             element_type = result.get("element_type", "element").upper()
-            caption = f"[{tag}:{idx}] {element_type}: {element_label} from {doc_title}, page {page}"
+            caption = f"{element_type}: {element_label} from {doc_title}, page {page}"
 
             if not image_path:
                 # No image available, show content text instead
@@ -618,20 +618,20 @@ llm-assistant: !l mercator projection
                 if image_result is None:
                     await self.client.send_message(
                         room_id,
-                        f"Could not fetch image for [{tag}:{idx}] - library server may be unavailable.",
+                        f"Could not fetch image for {element_label} - library server may be unavailable.",
                     )
                     continue
 
                 image_bytes, mimetype = image_result
                 filename = image_path.split("/")[-1]
 
-                # Upload and send image to Matrix
+                # Send caption first, then image
+                await self.client.send_message(room_id, caption)
                 await self.client.send_image(
                     room_id,
                     image_bytes,
                     filename,
                     mimetype,
-                    caption,
                 )
 
             except Exception as e:

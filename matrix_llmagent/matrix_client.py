@@ -134,16 +134,18 @@ class MatrixClient:
         image_data: bytes,
         filename: str,
         mimetype: str = "image/png",
-        caption: str | None = None,
     ) -> None:
         """Upload and send an image to a room.
+
+        Note: Element Web requires the body field to have a file extension
+        to display images inline. The filename is used as body.
+        Send any caption as a separate text message before calling this.
 
         Args:
             room_id: Matrix room ID
             image_data: Raw image bytes
-            filename: Filename for the image
+            filename: Filename for the image (must have extension like .png)
             mimetype: MIME type (default: image/png)
-            caption: Optional caption/body text for the image
         """
         # Upload image to Matrix content repository
         # nio.upload() expects a file-like object, not raw bytes
@@ -183,7 +185,8 @@ class MatrixClient:
 
         content: dict[str, Any] = {
             "msgtype": "m.image",
-            "body": caption or filename,
+            "body": filename,
+            "filename": filename,
             "url": mxc_url,
             "info": info,
         }
