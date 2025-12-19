@@ -103,7 +103,7 @@ def get_citation_tag(result: dict) -> str:
 
 
 def format_results(results: list[dict], library_name: str) -> str:
-    """Format search results for LLM consumption.
+    """Format search results in compact format.
 
     Args:
         results: List of search result dicts from the library API.
@@ -115,36 +115,28 @@ def format_results(results: list[dict], library_name: str) -> str:
     if not results:
         return f"No results found in {library_name}."
 
-    lines = [f"## {library_name} Results ({len(results)} found)", ""]
+    lines = [f"**{library_name}** ({len(results)} results)"]
 
     has_elements = False
     for i, result in enumerate(results, 1):
         tag = get_citation_tag(result)
-        score = result.get("score_pct", 0)
         page = result.get("page_number", "?")
         doc_title = result.get("document_title", "Unknown")
-        content = result.get("content", "")[:200].strip()
+        # Shorten doc title if too long
+        if len(doc_title) > 20:
+            doc_title = doc_title[:17] + "..."
+        content = result.get("content", "").replace("\n", " ")[:60].strip()
 
         if result.get("source_type") == "element":
             has_elements = True
-            elem_type = result.get("element_type", "element").upper()
             label = result.get("element_label", "")
-            lines.append(f"[{tag}:{i}] {elem_type}: {label} ({score:.0f}%, p.{page}, {doc_title})")
+            lines.append(f"[{tag}:{i}] {label} (p.{page}, {doc_title})")
         else:
-            chunk_idx = result.get("chunk_index", 0)
-            lines.append(
-                f"[{tag}:{i}] TEXT chunk {chunk_idx} ({score:.0f}%, p.{page}, {doc_title})"
-            )
+            lines.append(f"[{tag}:{i}] p.{page} {doc_title}: {content}...")
 
-        if content:
-            # Indent content preview
-            lines.append(f"  {content}...")
-        lines.append("")
-
-    # Add hint about show command if there are elements
     if has_elements:
-        lines.append("---")
-        lines.append("Use `show N` or `show 1,2,3` to view element images or text content.")
+        lines.append("")
+        lines.append("Use `show N` to view images/content")
 
     return "\n".join(lines)
 

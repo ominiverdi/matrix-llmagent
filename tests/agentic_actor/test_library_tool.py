@@ -123,9 +123,7 @@ class TestFormatResults:
         output = format_results(results, "Test Library")
 
         assert "[f:1]" in output
-        assert "FIGURE" in output
         assert "Figure 1" in output
-        assert "86%" in output  # 85.5 rounds to 86
         assert "p.10" in output
         assert "Test Doc" in output
         assert "show" in output.lower()  # Should suggest show command
@@ -145,9 +143,8 @@ class TestFormatResults:
         output = format_results(results, "Test Library")
 
         assert "[t:1]" in output
-        assert "TEXT" in output
-        assert "chunk 5" in output
-        assert "70%" in output
+        assert "p.25" in output
+        assert "Some text content" in output
 
     def test_format_mixed_results(self):
         """Test formatting mixed element and chunk results."""
@@ -174,8 +171,8 @@ class TestFormatResults:
 
         assert "[eq:1]" in output
         assert "[t:2]" in output
-        assert "EQUATION" in output
-        assert "TEXT" in output
+        assert "Eq. 1" in output
+        assert "Introduction text" in output
 
 
 class TestGetBestImagePath:
@@ -309,7 +306,7 @@ class TestLibrarySearchExecutor:
 
             result = await executor.execute("test query")
 
-        assert "Test Library Results" in result
+        assert "Test Library" in result
         assert "[t:1]" in result
 
         # Check cache was populated
