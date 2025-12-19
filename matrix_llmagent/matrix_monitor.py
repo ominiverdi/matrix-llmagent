@@ -596,14 +596,18 @@ llm-assistant: !l mercator projection
             image_path = get_best_image_path(result)
             element_label = result.get("element_label", "Element")
             element_type = result.get("element_type", "element").upper()
+            content = result.get("content", "")
+            # Build caption with description if available
             caption = f"{element_type}: {element_label} from {doc_title}, page {page}"
+            if content:
+                desc = content[:300] + "..." if len(content) > 300 else content
+                caption = f"{caption}\n\n{desc}"
 
             if not image_path:
-                # No image available, show content text instead
-                content = result.get("content", "No content available")[:500]
+                # No image available, show caption with description
                 await self.client.send_message(
                     room_id,
-                    f"{caption}\n(No image available)\n\n{content}",
+                    f"{caption}\n\n(No image available)",
                 )
                 continue
 
