@@ -10,6 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from .agentic_actor import AgenticLLMActor
+from .agentic_actor.library_tool import (
+    LibraryResultsCache,
+    fetch_library_image,
+    get_best_image_path,
+    get_citation_tag,
+    library_search_tool_def,
+    search_library_direct,
+)
 from .agentic_actor.tools import (
     entity_info_tool_def,
     knowledge_base_tool_def,
@@ -97,6 +105,24 @@ class MatrixLLMAgent:
             self.additional_tools.append(dict(entity_info_tool_def(kb_name)))
             logger.info(f"Knowledge base tool enabled: {kb_name}")
 
+        # Add library_search tool if configured
+        lib_config = self.config.get("tools", {}).get("library", {})
+        self.library_cache: LibraryResultsCache | None = None
+        if lib_config.get("enabled") and lib_config.get("base_url"):
+            lib_name = lib_config.get("name", "OSGeo Library")
+            lib_description = lib_config.get(
+                "description",
+                f"Search {lib_name} for scientific documents, figures, tables, and equations.",
+            )
+            self.additional_tools.append(dict(library_search_tool_def(lib_name, lib_description)))
+            # Create shared cache for library results (persists across actor runs)
+            cache_config = lib_config.get("cache", {})
+            self.library_cache = LibraryResultsCache(
+                ttl_hours=cache_config.get("ttl_hours", 24),
+                max_rooms=cache_config.get("max_rooms", 100),
+            )
+            logger.info(f"Library search tool enabled: {lib_name}")
+
     async def run_actor(
         self,
         context: list[dict[str, str]],
@@ -127,6 +153,19 @@ class MatrixLLMAgent:
                 "with the appropriate predicate. For general information queries, use knowledge_base.\n\n"
                 "When searching, use the EXACT terms from the user's question - do not assume typos or 'correct' "
                 "unfamiliar terms. Only use web_search if the local knowledge base doesn't have the information."
+            )
+
+        # Append library search guidance if enabled
+        lib_config = self.config.get("tools", {}).get("library", {})
+        if lib_config.get("enabled"):
+            lib_name = lib_config.get("name", "OSGeo Library")
+            lib_description = lib_config.get("description", "")
+            system_prompt = system_prompt + (
+                f"\n\nYou also have access to {lib_name} via the library_search tool. "
+                f"{lib_description}\n"
+                "Use library_search for questions about scientific documents, map projections, equations, figures, and tables. "
+                "Results include citation tags like [f:1] for figures, [t:2] for text, [eq:3] for equations, [tb:4] for tables. "
+                "When elements are available, suggest the user can type `show N` to view images."
             )
 
         actor = AgenticLLMActor(
@@ -235,6 +274,7 @@ Modes:
   !d <message>  - Sarcastic mode - witty, humorous responses
   !a <message>  - Agent mode - multi-turn research with tool chaining
   !p <message>  - Perplexity mode - web-enhanced AI responses
+  !l <query>    - Library search - direct search without LLM
   !u <message>  - Unsafe mode - uncensored responses
   !v <message>  - Verbose mode - get detailed responses instead of concise ones
   !h            - Show this help message
@@ -250,19 +290,188 @@ Tools Available:
     if kb_name:
         print(f"  - {kb_name} search")
 
+    lib_config = tools_config.get("library", {})
+    lib_name = lib_config.get("name", "OSGeo Library") if lib_config.get("enabled") else None
+    if lib_name:
+        print(f"  - {lib_name} search (use `show N` to view images)")
+
     print("""
 Examples:
   uv run matrix-llmagent --message "what is Python?"
   uv run matrix-llmagent --message "!v explain machine learning"
   uv run matrix-llmagent --message "!d tell me a programming joke"
   uv run matrix-llmagent --message "!a research recent AI developments"
+  uv run matrix-llmagent --message "!l mercator projection"
 
 Tips:
   - Responses are concise by default (1 sentence) - say "tell me more" for details
   - Use !v prefix when you need a comprehensive answer upfront
   - Use !a for complex research that needs multiple steps
   - Use !d when you want fun, sarcastic responses
+  - Use !l for quick library search, then `show N` to view images
 """)
+
+
+def _render_image_with_chafa(image_data: bytes, element_type: str | None = None) -> bool:
+    """Render image in terminal using chafa.
+
+    Args:
+        image_data: Raw image bytes
+        element_type: Optional element type for sizing hints
+
+    Returns:
+        True if rendering succeeded, False otherwise
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    # Check if chafa is available
+    if not shutil.which("chafa"):
+        print("(Install chafa for terminal image preview: sudo apt install chafa)")
+        return False
+
+    # Get terminal size for proportional display
+    term_size = shutil.get_terminal_size((120, 40))
+    max_width = min(term_size.columns - 4, 100)
+
+    # Adjust height based on element type
+    if element_type == "equation":
+        max_height = 12
+    elif element_type == "table":
+        max_height = min(term_size.lines - 8, 40)
+    else:
+        max_height = min(term_size.lines - 8, 35)
+
+    size = f"{max_width}x{max_height}"
+
+    try:
+        # Write image to temp file
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(image_data)
+            temp_path = f.name
+
+        # Run chafa with high-quality settings
+        result = subprocess.run(
+            [
+                "chafa",
+                "--size",
+                size,
+                "--symbols",
+                "all",
+                "-w",
+                "9",
+                "-c",
+                "full",
+                temp_path,
+            ],
+            capture_output=False,
+        )
+
+        # Clean up temp file
+        Path(temp_path).unlink(missing_ok=True)
+
+        return result.returncode == 0
+
+    except Exception as e:
+        logger.warning(f"Failed to render image with chafa: {e}")
+        return False
+
+
+def _parse_show_indices(message: str) -> list[int] | None:
+    """Parse 'show 1,2,3' command from message.
+
+    Returns:
+        List of 1-indexed result numbers, or None if not a show command.
+    """
+    match = re.match(r"^show\s+([\d,\s]+)$", message.strip(), re.IGNORECASE)
+    if not match:
+        return None
+    indices = [int(x) for x in re.findall(r"\d+", match.group(1))]
+    return indices if indices else None
+
+
+async def _handle_cli_show_command(agent: "MatrixLLMAgent", indices: list[int]) -> None:
+    """Handle show command in CLI mode - display images with chafa.
+
+    Args:
+        agent: MatrixLLMAgent instance with library_cache
+        indices: List of 1-indexed result numbers to show
+    """
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        print("Library search is not configured.")
+        return
+
+    cache = agent.library_cache
+    if cache is None:
+        print("No library search results available. Try searching first.")
+        return
+
+    # Use cli#test as the room_id for CLI mode
+    results = cache.get("cli#test")
+    if not results:
+        print("No library search results available. Try searching first.")
+        return
+
+    base_url = lib_config["base_url"]
+
+    for idx in indices:
+        # Validate index
+        if idx < 1 or idx > len(results):
+            print(f"Invalid index [{idx}]. Available: 1-{len(results)}")
+            continue
+
+        result = results[idx - 1]  # Convert to 0-indexed
+        tag = get_citation_tag(result)
+        doc_title = result.get("document_title", "Unknown")
+        page = result.get("page_number", "?")
+        element_type = result.get("element_type")
+
+        # Handle text chunks - show the text content
+        if result.get("source_type") == "chunk":
+            content = result.get("content", "")[:1500]
+            print(f"\n[{tag}:{idx}] TEXT from {doc_title}, page {page}")
+            print("-" * 40)
+            print(content)
+            print()
+            continue
+
+        # Handle elements
+        element_label = result.get("element_label", "Element")
+        element_type_upper = (element_type or "element").upper()
+        print(f"\n[{tag}:{idx}] {element_type_upper}: {element_label}")
+        print(f"From: {doc_title}, page {page}")
+
+        image_path = get_best_image_path(result)
+        if not image_path:
+            # No image available, show content text instead
+            content = result.get("content", "No content available")[:500]
+            print("(No image available)")
+            print(content)
+            continue
+
+        # Fetch image from library server
+        try:
+            image_result = await fetch_library_image(
+                base_url,
+                result.get("document_slug", ""),
+                image_path,
+            )
+
+            if image_result is None:
+                print("Could not fetch image - library server may be unavailable.")
+                continue
+
+            image_bytes, _ = image_result
+            print()  # Blank line before image
+
+            if not _render_image_with_chafa(image_bytes, element_type):
+                print("(Image available but could not be rendered)")
+
+        except Exception as e:
+            logger.error(f"Error handling show command for [{tag}:{idx}]: {e}")
+            print(f"Error fetching image: {e}")
 
 
 async def cli_message(message: str, config_path: str | None = None) -> None:
@@ -283,6 +492,50 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         # Handle help command
         if message.lower().strip() in ("!h", "!help", "help"):
             _print_cli_help(agent.config)
+            return
+
+        # Handle show command
+        show_indices = _parse_show_indices(message)
+        if show_indices is not None:
+            await _handle_cli_show_command(agent, show_indices)
+            return
+
+        # Handle !l library search command (direct, no LLM)
+        if message.startswith("!l ") or message.startswith("!L "):
+            query = message[3:].strip()
+            if not query:
+                print("Usage: !l <search query>")
+                return
+
+            lib_config = agent.config.get("tools", {}).get("library", {})
+            if not lib_config.get("enabled") or not lib_config.get("base_url"):
+                print("Library search is not configured.")
+                return
+
+            lib_name = lib_config.get("name", "OSGeo Library")
+            max_results = lib_config.get("max_results", 10)
+
+            # Ensure cache exists
+            if agent.library_cache is None:
+                cache_config = lib_config.get("cache", {})
+                agent.library_cache = LibraryResultsCache(
+                    ttl_hours=cache_config.get("ttl_hours", 24),
+                    max_rooms=cache_config.get("max_rooms", 100),
+                )
+
+            print(f"Searching {lib_name} for: {query}")
+            print("-" * 60)
+
+            results, formatted = await search_library_direct(
+                base_url=lib_config["base_url"],
+                query=query,
+                cache=agent.library_cache,
+                arc="cli#test",
+                name=lib_name,
+                limit=max_results,
+            )
+
+            print(formatted)
             return
 
         # Parse mode and verbose flag from message prefix

@@ -15,6 +15,10 @@ import aiohttp
 from ddgs import DDGS
 
 from ..chronicler.tools import ChapterAppendExecutor, ChapterRenderExecutor, chronicle_tools_defs
+from .library_tool import (
+    LibraryResultsCache,
+    LibrarySearchExecutor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1865,6 +1869,7 @@ def create_tool_executors(
     agent: Any,
     arc: str,
     router: Any = None,
+    library_cache: LibraryResultsCache | None = None,
 ) -> dict[str, Any]:
     """Create tool executors with configuration."""
     # Tool configs
@@ -1990,6 +1995,27 @@ def create_tool_executors(
             name=kb_config.get("name", "Knowledge Base"),
         )
         logger.info("Entity info enabled")
+
+    # Add library_search if configured
+    lib_config = tools.get("library", {})
+    if lib_config.get("enabled") and lib_config.get("base_url"):
+        # Use provided cache or create a new one (prefer agent's shared cache)
+        cache = library_cache
+        if cache is None:
+            cache_config = lib_config.get("cache", {})
+            cache = LibraryResultsCache(
+                ttl_hours=cache_config.get("ttl_hours", 24),
+                max_rooms=cache_config.get("max_rooms", 100),
+            )
+        executors["library_search"] = LibrarySearchExecutor(
+            base_url=lib_config["base_url"],
+            cache=cache,
+            arc=arc,  # Pass arc for caching results per-room
+            name=lib_config.get("name", "OSGeo Library"),
+            description=lib_config.get("description", ""),
+            max_results=lib_config.get("max_results", 10),
+        )
+        logger.info(f"Library search enabled: {lib_config.get('name', 'OSGeo Library')}")
 
     return executors
 

@@ -6,6 +6,13 @@ import re
 
 from nio import MatrixRoom, RoomMessageText
 
+from .agentic_actor.library_tool import (
+    LibraryResultsCache,
+    fetch_library_image,
+    get_best_image_path,
+    get_citation_tag,
+    search_library_direct,
+)
 from .matrix_client import MatrixClient
 from .rate_limiter import RateLimiter
 from .rooms import ProactiveDebouncer
@@ -59,6 +66,25 @@ DEFAULT_PASTE_THRESHOLD = 2000
 #     except Exception as e:
 #         logger.warning(f"Failed to upload to paste service: {e}")
 #     return None
+
+
+def _parse_show_command(message: str) -> list[int] | None:
+    """Parse 'show 1,2,3' or 'show 1 2 3' command.
+
+    Args:
+        message: Message text
+
+    Returns:
+        List of 1-indexed result numbers, or None if not a show command.
+    """
+    # Match "show" followed by numbers (comma or space separated)
+    match = re.match(r"^show\s+([\d,\s]+)$", message.strip(), re.IGNORECASE)
+    if not match:
+        return None
+
+    # Extract all numbers from the argument
+    indices = [int(x) for x in re.findall(r"\d+", match.group(1))]
+    return indices if indices else None
 
 
 def _truncate_to_words(text: str, max_words: int = DEFAULT_SUMMARY_WORDS) -> str:
@@ -181,6 +207,12 @@ class MatrixMonitor:
 
         logger.debug(f"Received message in {room_id} from {sender}: {message}")
 
+        # Check for show command first (works without addressing the bot)
+        show_indices = _parse_show_command(message)
+        if show_indices is not None:
+            await self._handle_show_command(room_id, show_indices)
+            return
+
         # Check if message is addressed to us
         if self.is_addressed_to_bot(message, sender, room_id):
             await self.handle_command(room_id, sender, message)
@@ -250,6 +282,13 @@ class MatrixMonitor:
         # Handle help command
         if clean_message.lower().strip() in ("!h", "!help", "help"):
             await self._send_help(room_id)
+            return
+
+        # Handle !l library search (direct, no LLM)
+        if clean_message.startswith("!l ") or clean_message.startswith("!L "):
+            query = clean_message[3:].strip()
+            if query:
+                await self._handle_library_search(room_id, query)
             return
 
         # Parse command mode
@@ -448,6 +487,7 @@ class MatrixMonitor:
 - `!d <message>` - Sarcastic mode - witty, humorous responses
 - `!a <message>` - Agent mode - multi-turn research with tool chaining
 - `!p <message>` - Perplexity mode - web-enhanced AI responses
+- `!l <query>` - Library search - direct search without LLM
 - `!u <message>` - Unsafe mode - uncensored responses
 - `!v <message>` - Verbose mode - get detailed responses instead of concise ones
 - `!h` - Show this help message
@@ -470,13 +510,15 @@ llm-assistant: what is Python?
 llm-assistant: !v explain machine learning
 llm-assistant: !d tell me a programming joke
 llm-assistant: !a research recent AI developments
+llm-assistant: !l mercator projection
 ```
 
 **Tips:**
 - Responses are concise by default (1 sentence) - say "tell me more" for details
 - Use `!v` prefix when you need a comprehensive answer upfront
 - Use `!a` for complex research that needs multiple steps
-- Use `!d` when you want fun, sarcastic responses"""
+- Use `!d` when you want fun, sarcastic responses
+- Use `!l` for quick library search, then `show N` to view images"""
 
         await self.client.send_message(room_id, help_text)
 
@@ -491,6 +533,157 @@ llm-assistant: !a research recent AI developments
         # TODO: Implement proactive interjecting
         # This would check if the conversation is relevant and interject
         pass
+
+    async def _handle_show_command(self, room_id: str, indices: list[int]) -> None:
+        """Handle show command to display library search results.
+
+        Args:
+            room_id: Matrix room ID
+            indices: List of 1-indexed result numbers to show
+        """
+        # Check if library is configured and cache is available
+        lib_config = self.config.get("tools", {}).get("library", {})
+        if not lib_config.get("enabled") or not lib_config.get("base_url"):
+            await self.client.send_message(
+                room_id,
+                "Library search is not configured. Use library_search tool first.",
+            )
+            return
+
+        # Get cached results from agent
+        cache = getattr(self.agent, "library_cache", None)
+        if cache is None:
+            await self.client.send_message(
+                room_id,
+                "No library search results available. Try searching first.",
+            )
+            return
+
+        # Use consistent arc format for cache key
+        arc = f"matrix#{room_id}"
+        results = cache.get(arc)
+        if not results:
+            await self.client.send_message(
+                room_id,
+                "No library search results available for this room. Try searching first.",
+            )
+            return
+
+        base_url = lib_config["base_url"]
+
+        for idx in indices:
+            # Validate index
+            if idx < 1 or idx > len(results):
+                await self.client.send_message(
+                    room_id,
+                    f"Invalid index [{idx}]. Available: 1-{len(results)}",
+                )
+                continue
+
+            result = results[idx - 1]  # Convert to 0-indexed
+            tag = get_citation_tag(result)
+            doc_title = result.get("document_title", "Unknown")
+            page = result.get("page_number", "?")
+
+            # Handle text chunks - show the text content
+            if result.get("source_type") == "chunk":
+                content = result.get("content", "")[:1000]  # Limit to 1000 chars
+                label = f"[{tag}:{idx}] TEXT from {doc_title}, page {page}"
+                await self.client.send_message(room_id, f"{label}\n\n{content}")
+                continue
+
+            # Handle elements - try to fetch and display image
+            image_path = get_best_image_path(result)
+            element_label = result.get("element_label", "Element")
+            element_type = result.get("element_type", "element").upper()
+            caption = f"[{tag}:{idx}] {element_type}: {element_label} from {doc_title}, page {page}"
+
+            if not image_path:
+                # No image available, show content text instead
+                content = result.get("content", "No content available")[:500]
+                await self.client.send_message(
+                    room_id,
+                    f"{caption}\n(No image available)\n\n{content}",
+                )
+                continue
+
+            # Fetch image from library server
+            try:
+                image_result = await fetch_library_image(
+                    base_url,
+                    result.get("document_slug", ""),
+                    image_path,
+                )
+
+                if image_result is None:
+                    await self.client.send_message(
+                        room_id,
+                        f"Could not fetch image for [{tag}:{idx}] - library server may be unavailable.",
+                    )
+                    continue
+
+                image_bytes, mimetype = image_result
+                filename = image_path.split("/")[-1]
+
+                # Upload and send image to Matrix
+                await self.client.send_image(
+                    room_id,
+                    image_bytes,
+                    filename,
+                    mimetype,
+                    caption,
+                )
+
+            except Exception as e:
+                logger.error(f"Error handling show command for [{tag}:{idx}]: {e}")
+                await self.client.send_message(
+                    room_id,
+                    f"Error fetching image for [{tag}:{idx}]: {e}",
+                )
+
+    async def _handle_library_search(self, room_id: str, query: str) -> None:
+        """Handle !l library search command (direct, no LLM).
+
+        Args:
+            room_id: Matrix room ID
+            query: Search query string
+        """
+        lib_config = self.config.get("tools", {}).get("library", {})
+        if not lib_config.get("enabled") or not lib_config.get("base_url"):
+            await self.client.send_message(
+                room_id,
+                "Library search is not configured.",
+            )
+            return
+
+        lib_name = lib_config.get("name", "OSGeo Library")
+        max_results = lib_config.get("max_results", 10)
+
+        # Ensure cache exists on agent
+        cache = getattr(self.agent, "library_cache", None)
+        if cache is None:
+            cache_config = lib_config.get("cache", {})
+            cache = LibraryResultsCache(
+                ttl_hours=cache_config.get("ttl_hours", 24),
+                max_rooms=cache_config.get("max_rooms", 100),
+            )
+            self.agent.library_cache = cache
+
+        # Use room_id as the arc for caching
+        arc = f"matrix#{room_id}"
+
+        logger.info(f"Direct library search in {room_id}: {query}")
+
+        results, formatted = await search_library_direct(
+            base_url=lib_config["base_url"],
+            query=query,
+            cache=cache,
+            arc=arc,
+            name=lib_name,
+            limit=max_results,
+        )
+
+        await self.client.send_message(room_id, formatted)
 
     async def send_message(self, room_id: str, message: str) -> None:
         """Send a message to a Matrix room.

@@ -1,5 +1,6 @@
 """Matrix client using matrix-nio for communication."""
 
+import io
 import logging
 from typing import Any
 
@@ -126,6 +127,62 @@ class MatrixClient:
             logger.info(f"Joined room: {response.room_id}")
         else:
             logger.error(f"Failed to join room {room_id}: {response}")
+
+    async def send_image(
+        self,
+        room_id: str,
+        image_data: bytes,
+        filename: str,
+        mimetype: str = "image/png",
+        caption: str | None = None,
+    ) -> None:
+        """Upload and send an image to a room.
+
+        Args:
+            room_id: Matrix room ID
+            image_data: Raw image bytes
+            filename: Filename for the image
+            mimetype: MIME type (default: image/png)
+            caption: Optional caption/body text for the image
+        """
+        # Upload image to Matrix content repository
+        # nio.upload() expects a file-like object, not raw bytes
+        data_stream = io.BytesIO(image_data)
+        upload_response, _ = await self.client.upload(
+            data_stream,
+            content_type=mimetype,
+            filename=filename,
+            filesize=len(image_data),
+        )
+
+        if not hasattr(upload_response, "content_uri"):
+            logger.error(f"Failed to upload image to Matrix: {upload_response}")
+            return
+
+        mxc_url = upload_response.content_uri
+        logger.debug(f"Uploaded image to Matrix: {mxc_url}")
+
+        # Send m.image message
+        content: dict[str, Any] = {
+            "msgtype": "m.image",
+            "body": caption or filename,
+            "url": mxc_url,
+            "info": {
+                "mimetype": mimetype,
+                "size": len(image_data),
+            },
+        }
+
+        response = await self.client.room_send(
+            room_id=room_id,
+            message_type="m.room.message",
+            content=content,
+        )
+
+        if hasattr(response, "event_id"):
+            logger.debug(f"Image sent to {room_id}: {response.event_id}")
+        else:
+            logger.error(f"Failed to send image to {room_id}: {response}")
 
     async def close(self) -> None:
         """Close the Matrix client connection."""

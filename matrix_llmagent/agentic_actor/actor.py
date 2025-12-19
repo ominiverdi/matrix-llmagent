@@ -66,12 +66,15 @@ class AgenticLLMActor:
         )
 
         # Create tool executors with the provided arc
+        # Pass library_cache from agent if available (persists across actor runs)
+        library_cache = getattr(self.agent, "library_cache", None)
         base_executors = create_tool_executors(
             self.config,
             progress_callback=progress_callback,
             agent=self.agent,
             arc=arc,
             router=self.model_router,
+            library_cache=library_cache,
         )
         tool_executors = {**base_executors, **self.additional_tool_executors}
 
