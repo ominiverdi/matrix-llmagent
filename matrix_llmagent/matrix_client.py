@@ -162,15 +162,30 @@ class MatrixClient:
         mxc_url = upload_response.content_uri
         logger.debug(f"Uploaded image to Matrix: {mxc_url}")
 
+        # Try to get image dimensions for proper inline display
+        width, height = None, None
+        try:
+            from PIL import Image
+
+            img = Image.open(io.BytesIO(image_data))
+            width, height = img.size
+        except Exception:
+            pass  # Dimensions are optional
+
         # Send m.image message
+        info: dict[str, Any] = {
+            "mimetype": mimetype,
+            "size": len(image_data),
+        }
+        if width and height:
+            info["w"] = width
+            info["h"] = height
+
         content: dict[str, Any] = {
             "msgtype": "m.image",
             "body": caption or filename,
             "url": mxc_url,
-            "info": {
-                "mimetype": mimetype,
-                "size": len(image_data),
-            },
+            "info": info,
         }
 
         response = await self.client.room_send(
