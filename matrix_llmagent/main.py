@@ -391,12 +391,15 @@ def _parse_show_indices(message: str) -> list[int] | None:
     return indices if indices else None
 
 
-async def _handle_cli_show_command(agent: "MatrixLLMAgent", indices: list[int]) -> None:
+async def _handle_cli_show_command(
+    agent: "MatrixLLMAgent", indices: list[int], arc: str = "cli#test"
+) -> None:
     """Handle show command in CLI mode - display images with chafa.
 
     Args:
         agent: MatrixLLMAgent instance with library_cache
         indices: List of 1-indexed result numbers to show
+        arc: Arc identifier for cache lookup (default: cli#test for single-message mode)
     """
     lib_config = agent.config.get("tools", {}).get("library", {})
     if not lib_config.get("enabled") or not lib_config.get("base_url"):
@@ -408,8 +411,7 @@ async def _handle_cli_show_command(agent: "MatrixLLMAgent", indices: list[int]) 
         print("No library search results available. Try searching first.")
         return
 
-    # Use cli#test as the room_id for CLI mode
-    results = cache.get("cli#test")
+    results = cache.get(arc)
     if not results:
         print("No library search results available. Try searching first.")
         return
@@ -423,7 +425,6 @@ async def _handle_cli_show_command(agent: "MatrixLLMAgent", indices: list[int]) 
             continue
 
         result = results[idx - 1]  # Convert to 0-indexed
-        tag = get_citation_tag(result)
         doc_title = result.get("document_title", "Unknown")
         page = result.get("page_number", "?")
         element_type = result.get("element_type")
@@ -431,7 +432,7 @@ async def _handle_cli_show_command(agent: "MatrixLLMAgent", indices: list[int]) 
         # Handle text chunks - show the text content
         if result.get("source_type") == "chunk":
             content = result.get("content", "")[:1500]
-            print(f"\n[{tag}:{idx}] TEXT from {doc_title}, page {page}")
+            print(f"\n#{idx}. TEXT from {doc_title}, page {page}")
             print("-" * 40)
             print(content)
             print()
@@ -440,7 +441,7 @@ async def _handle_cli_show_command(agent: "MatrixLLMAgent", indices: list[int]) 
         # Handle elements
         element_label = result.get("element_label", "Element")
         element_type_upper = (element_type or "element").upper()
-        print(f"\n[{tag}:{idx}] {element_type_upper}: {element_label}")
+        print(f'\n#{idx}. {element_type_upper}: "{element_label}"')
         print(f"From: {doc_title}, page {page}")
 
         image_path = get_best_image_path(result)
@@ -470,7 +471,7 @@ async def _handle_cli_show_command(agent: "MatrixLLMAgent", indices: list[int]) 
                 print("(Image available but could not be rendered)")
 
         except Exception as e:
-            logger.error(f"Error handling show command for [{tag}:{idx}]: {e}")
+            logger.error(f"Error handling show command for #{idx}: {e}")
             print(f"Error fetching image: {e}")
 
 
@@ -662,7 +663,7 @@ async def cli_chronicler(arc: str, instructions: str, config_path: str | None = 
         print("Please create config.json from config.json.example")
         sys.exit(1)
 
-    print(f"🔮 Chronicler arc '{arc}': {instructions}")
+    print(f"Chronicler arc '{arc}': {instructions}")
     print("=" * 60)
 
     try:
@@ -675,11 +676,220 @@ async def cli_chronicler(arc: str, instructions: str, config_path: str | None = 
         )
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
         import traceback
 
         traceback.print_exc()
         sys.exit(1)
+
+
+async def cli_interactive(config_path: str | None = None) -> None:
+    """Interactive CLI mode that simulates a Matrix room.
+
+    Maintains conversation history, supports library search with chafa image display,
+    and follows the same command patterns as the Matrix client.
+    """
+    import readline  # noqa: F401 - imported for side effects (line editing)
+
+    # Load configuration
+    config_file = Path(config_path) if config_path else Path(__file__).parent.parent / "config.json"
+
+    if not config_file.exists():
+        print(f"Error: Config file not found at {config_file}")
+        print("Please create config.json from config.json.example")
+        sys.exit(1)
+
+    try:
+        agent = MatrixLLMAgent(str(config_file))
+        await agent.history.initialize()
+        await agent.chronicle.initialize()
+
+        # Persistent arc for CLI interactive session (like a Matrix room)
+        arc = "cli#interactive"
+        bot_name = "cli-assistant"
+
+        # Get command configuration
+        command_config = agent.config.get("matrix", {}).get("command", {})
+        default_mode = command_config.get("default_mode", "serious")
+
+        print("matrix-llmagent interactive mode")
+        print("Type 'help' for commands, 'quit' to exit")
+        print("-" * 60)
+
+        while True:
+            try:
+                message = input("> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nGoodbye!")
+                break
+
+            if not message:
+                continue
+
+            # Handle quit
+            if message.lower() in ("quit", "exit", "q"):
+                print("Goodbye!")
+                break
+
+            # Handle help
+            if message.lower() in ("help", "!h", "!help"):
+                _print_cli_help(agent.config)
+                continue
+
+            # Handle show command
+            show_indices = _parse_show_indices(message)
+            if show_indices is not None:
+                await _handle_cli_show_command(agent, show_indices, arc)
+                continue
+
+            # Handle !l library search (direct, no LLM)
+            if message.startswith("!l ") or message.startswith("!L "):
+                query = message[3:].strip()
+                if not query:
+                    print("Usage: !l <search query>")
+                    continue
+
+                lib_config = agent.config.get("tools", {}).get("library", {})
+                if not lib_config.get("enabled") or not lib_config.get("base_url"):
+                    print("Library search is not configured.")
+                    continue
+
+                lib_name = lib_config.get("name", "OSGeo Library")
+                max_results = lib_config.get("max_results", 10)
+
+                # Ensure cache exists
+                if agent.library_cache is None:
+                    cache_config = lib_config.get("cache", {})
+                    agent.library_cache = LibraryResultsCache(
+                        ttl_hours=cache_config.get("ttl_hours", 24),
+                        max_rooms=cache_config.get("max_rooms", 100),
+                    )
+
+                print(f"Searching {lib_name}...")
+
+                results, formatted = await search_library_direct(
+                    base_url=lib_config["base_url"],
+                    query=query,
+                    cache=agent.library_cache,
+                    arc=arc,
+                    name=lib_name,
+                    limit=max_results,
+                )
+                print(formatted)
+                continue
+
+            # Determine mode from message (same as Matrix client)
+            mode = default_mode
+            verbose = False
+            clean_message = message
+
+            # Check for verbose modifier
+            if message.startswith("!v ") or message.startswith("!V "):
+                verbose = True
+                clean_message = message[3:]
+
+            # Check for mode prefixes
+            if clean_message.startswith("!s ") or clean_message.startswith("!S "):
+                mode = "serious"
+                clean_message = clean_message[3:]
+            elif clean_message.startswith("!d ") or clean_message.startswith("!D "):
+                mode = "sarcastic"
+                clean_message = clean_message[3:]
+            elif clean_message.startswith("!2 "):
+                mode = "serious2"
+                clean_message = clean_message[3:]
+            elif clean_message.startswith("!3 "):
+                mode = "serious3"
+                clean_message = clean_message[3:]
+            elif clean_message.startswith("!4 "):
+                mode = "serious4"
+                clean_message = clean_message[3:]
+            elif clean_message.startswith("!5 "):
+                mode = "serious5"
+                clean_message = clean_message[3:]
+            elif clean_message.startswith("!6 "):
+                mode = "serious6"
+                clean_message = clean_message[3:]
+            elif clean_message.startswith("!7 "):
+                mode = "serious7"
+                clean_message = clean_message[3:]
+
+            # Get mode configuration with inheritance
+            modes = command_config.get("modes", {})
+            mode_cfg = modes.get(mode, {})
+
+            # Inherit from base mode if this is a numbered slot
+            if mode.startswith("serious") and mode != "serious":
+                base_cfg = modes.get("serious", {})
+                mode_cfg = {**base_cfg, **mode_cfg}
+
+            if not mode_cfg:
+                print(f"Error: Mode '{mode}' not configured")
+                continue
+            if not mode_cfg.get("model"):
+                print(f"Error: No model configured for mode '{mode}'")
+                continue
+
+            # Build context from chat history (same as Matrix room)
+            history_size = mode_cfg.get("history_size", command_config.get("history_size", 30))
+            context = await agent.history.get_context("cli", "interactive", history_size)
+
+            # Add current message to context
+            context.append({"role": "user", "content": clean_message})
+
+            # Build system prompt
+            system_prompt = mode_cfg.get("system_prompt", "You are a helpful assistant.")
+            system_prompt = system_prompt.replace("{mynick}", bot_name)
+
+            # Apply verbosity modifier
+            if verbose:
+                system_prompt += " Provide comprehensive, detailed responses."
+            else:
+                system_prompt += (
+                    " Keep responses to 1 sentence max. Users can say 'tell me more' for details."
+                )
+
+            # Run actor
+            try:
+                response = await agent.run_actor(
+                    context,
+                    mode_cfg=mode_cfg,
+                    system_prompt=system_prompt,
+                    arc=arc,
+                )
+
+                if response:
+                    # Add slot label if configured
+                    slot_label = mode_cfg.get("slot_label")
+                    if slot_label:
+                        response = f"[{slot_label}] {response}"
+
+                    print("-" * 60)
+                    print(response)
+
+                    # Save to history (same as Matrix)
+                    await agent.history.add_message(
+                        "cli", "interactive", clean_message, "user", "user"
+                    )
+                    await agent.history.add_message(
+                        "cli", "interactive", response, bot_name, bot_name, True
+                    )
+                else:
+                    print("(No response)")
+
+            except Exception as e:
+                logger.error(f"Error: {e}")
+                print(f"Error: {e}")
+
+    except Exception as e:
+        logger.error(f"CLI interactive error: {e}")
+        print(f"Error: {e}")
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
+    finally:
+        await agent.history.close()
 
 
 def main() -> None:
@@ -689,6 +899,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--message", type=str, help="Run in CLI mode to simulate handling a message"
+    )
+    parser.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        help="Run in interactive CLI mode (simulates a Matrix room)",
     )
     parser.add_argument(
         "--config", type=str, help="Path to config file (default: config.json in project root)"
@@ -711,7 +927,9 @@ def main() -> None:
         asyncio.run(cli_chronicler(args.arc, args.chronicler, args.config))
         return
 
-    if args.message:
+    if args.interactive:
+        asyncio.run(cli_interactive(args.config))
+    elif args.message:
         asyncio.run(cli_message(args.message, args.config))
     else:
         agent = MatrixLLMAgent()

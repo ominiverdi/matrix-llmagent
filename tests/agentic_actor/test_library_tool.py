@@ -122,7 +122,8 @@ class TestFormatResults:
         ]
         output = format_results(results, "Test Library")
 
-        assert "[f:1]" in output
+        assert "[RESULT #1]" in output  # Result number format
+        assert "FIGURE" in output  # Element type
         assert "Figure 1" in output
         assert "p.10" in output
         assert "Test Doc" in output
@@ -142,7 +143,8 @@ class TestFormatResults:
         ]
         output = format_results(results, "Test Library")
 
-        assert "[t:1]" in output
+        assert "[RESULT #1]" in output  # Result number format
+        assert "TEXT" in output  # Text chunk indicator
         assert "p.25" in output
         assert "Some text content" in output
 
@@ -169,8 +171,10 @@ class TestFormatResults:
         ]
         output = format_results(results, "Test Library")
 
-        assert "[eq:1]" in output
-        assert "[t:2]" in output
+        assert "[RESULT #1]" in output  # First result
+        assert "[RESULT #2]" in output  # Second result
+        assert "EQUATION" in output  # Equation type
+        assert "TEXT" in output  # Text chunk type
         assert "Eq. 1" in output
         assert "Introduction text" in output
 
@@ -306,8 +310,10 @@ class TestLibrarySearchExecutor:
 
             result = await executor.execute("test query")
 
+        # Hybrid format: text content for LLM (no [RESULT #N] format)
         assert "Test Library" in result
-        assert "[t:1]" in result
+        assert "Test content" in result  # Content from text chunk
+        assert "Test Doc" in result  # Document title
 
         # Check cache was populated
         cached = cache.get("test#room")
@@ -516,7 +522,8 @@ class TestSearchLibraryDirect:
         assert len(results) == 1
         assert results[0]["element_label"] == "Figure 1"
         assert "Test Library" in formatted
-        assert "[f:1]" in formatted
+        assert "[RESULT #1]" in formatted  # Result number format
+        assert "FIGURE" in formatted  # Figure type
 
     @pytest.mark.asyncio
     async def test_caches_results(self):

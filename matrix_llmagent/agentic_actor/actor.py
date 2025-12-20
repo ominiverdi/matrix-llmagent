@@ -53,6 +53,24 @@ class AgenticLLMActor:
 
         # Tool executors will be created in run_agent with arc parameter
 
+    def _append_library_footer(self, response: str, arc: str) -> str:
+        """Append library element footer to response if available."""
+        library_cache = getattr(self.agent, "library_cache", None)
+        if library_cache is None:
+            return response
+
+        # Check if cache has the pop_element_footer method (avoid mocks)
+        if not hasattr(library_cache, "pop_element_footer"):
+            return response
+
+        try:
+            footer = library_cache.pop_element_footer(arc)
+            if footer and isinstance(footer, str):
+                return f"{response}\n\n---\n{footer}"
+        except (AttributeError, TypeError):
+            pass
+        return response
+
     async def run_agent(
         self,
         context: list[dict],
@@ -237,7 +255,8 @@ class AgenticLLMActor:
                         await self._generate_and_store_persistence_summary(
                             persistent_tool_calls, progress_callback
                         )
-                    return f"{result['text']}{result_suffix}"
+                    final_response = f"{result['text']}{result_suffix}"
+                    return self._append_library_footer(final_response, arc)
                 elif result["type"] == "truncated_tool_retry":
                     # Add assistant's truncated tool request to conversation
                     if response and isinstance(response, dict):
@@ -364,7 +383,8 @@ class AgenticLLMActor:
                                         await self._generate_and_store_persistence_summary(
                                             persistent_tool_calls, progress_callback
                                         )
-                                    return f"{cleaned_result}{result_suffix}"
+                                    final_response = f"{cleaned_result}{result_suffix}"
+                                    return self._append_library_footer(final_response, arc)
 
                         except Exception as e:
                             logger.warning(f"Tool {tool['name']} failed: {e}", exc_info=True)

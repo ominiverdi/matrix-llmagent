@@ -25,6 +25,7 @@ class CachedResults:
 
     results: list[dict]
     timestamp: float
+    element_footer: str | None = None  # Footer with element references for hybrid mode
 
 
 class LibraryResultsCache:
@@ -41,13 +42,15 @@ class LibraryResultsCache:
         self.max_rooms = max_rooms
         self._cache: dict[str, CachedResults] = {}
 
-    def store(self, room_id: str, results: list[dict]) -> None:
+    def store(self, room_id: str, results: list[dict], element_footer: str | None = None) -> None:
         """Store search results for a room."""
         # Evict oldest if at capacity and this is a new room
         if room_id not in self._cache and len(self._cache) >= self.max_rooms:
             self._evict_oldest()
 
-        self._cache[room_id] = CachedResults(results=results, timestamp=time.time())
+        self._cache[room_id] = CachedResults(
+            results=results, timestamp=time.time(), element_footer=element_footer
+        )
         logger.debug(f"Cached {len(results)} library results for room {room_id}")
 
     def get(self, room_id: str) -> list[dict] | None:
@@ -67,6 +70,15 @@ class LibraryResultsCache:
         """Clear cached results for a room."""
         if room_id in self._cache:
             del self._cache[room_id]
+
+    def pop_element_footer(self, room_id: str) -> str | None:
+        """Get and clear the element footer for a room (one-time use after LLM response)."""
+        entry = self._cache.get(room_id)
+        if entry is None:
+            return None
+        footer = entry.element_footer
+        entry.element_footer = None  # Clear after retrieval
+        return footer
 
     def _evict_oldest(self) -> None:
         """Evict the oldest cache entry (LRU)."""
@@ -102,20 +114,88 @@ def get_citation_tag(result: dict) -> str:
 # --- Result Formatting ---
 
 
-def format_results(results: list[dict], library_name: str) -> str:
-    """Format search results in compact format.
+def format_results_hybrid(results: list[dict], library_name: str) -> tuple[str, str | None]:
+    """Format search results with text for LLM and elements as separate footer.
+
+    This hybrid approach gives the LLM text content to discuss naturally,
+    while element references (figures, tables, equations) are extracted
+    and returned separately to be appended after the LLM response.
 
     Args:
         results: List of search result dicts from the library API.
         library_name: Name of the library for the header.
 
     Returns:
-        Formatted string with numbered results and citation tags.
+        Tuple of (llm_content, element_footer).
+        - llm_content: Text chunks for LLM to discuss
+        - element_footer: Element references to append after LLM response, or None
+    """
+    if not results:
+        return f"No results found in {library_name}.", None
+
+    text_lines = [f"**{library_name}** found relevant content:"]
+    element_lines = []
+
+    for i, result in enumerate(results, 1):
+        page = result.get("page_number", "?")
+        doc_title = result.get("document_title", "Unknown")
+        if len(doc_title) > 30:
+            doc_title = doc_title[:27] + "..."
+        content = result.get("content", "").replace("\n", " ").strip()
+
+        if result.get("source_type") == "element":
+            # Elements go to footer - user can request with show N
+            label = result.get("element_label", "")
+            elem_type = result.get("element_type", "element").upper()
+            desc = content[:120] + "..." if len(content) > 120 else content
+            element_lines.append(f'  show {i}: {elem_type} "{label}" (p.{page}) - {desc}')
+        else:
+            # Text chunks go to LLM for discussion
+            desc = content[:500] + "..." if len(content) > 500 else content
+            text_lines.append(f"\nFrom {doc_title}, p.{page}:")
+            text_lines.append(f"  {desc}")
+
+    # Build LLM content
+    if len(text_lines) == 1:
+        # No text results, only elements
+        llm_content = f"**{library_name}** found {len(element_lines)} visual elements (figures, tables, equations). Use the `show N` commands below to view them."
+    else:
+        llm_content = "\n".join(text_lines)
+
+    # Build element footer
+    if element_lines:
+        element_footer = "Available elements:\n" + "\n".join(element_lines)
+    else:
+        element_footer = None
+
+    return llm_content, element_footer
+
+
+def format_results(results: list[dict], library_name: str, *, compact: bool = False) -> str:
+    """Format search results with rich descriptions for LLM comprehension.
+
+    The format uses explicit result numbers (1, 2, 3...) that users can reference
+    with `show N`. Element labels (e.g., "Figure 10") are kept separate to avoid
+    confusion between result indices and element labels.
+
+    Args:
+        results: List of search result dicts from the library API.
+        library_name: Name of the library for the header.
+        compact: If True, use shorter truncation for display (120/150 chars).
+                 If False, use longer content for LLM understanding (500 chars).
+
+    Returns:
+        Formatted string with numbered results, citation tags, and descriptions.
     """
     if not results:
         return f"No results found in {library_name}."
 
+    # Truncation limits: compact for user display, longer for LLM
+    element_limit = 120 if compact else 500
+    text_limit = 150 if compact else 500
+
     lines = [f"**{library_name}** ({len(results)} results)"]
+    lines.append("Results numbered 1-{} for `show N` command:".format(len(results)))
 
     has_elements = False
     for i, result in enumerate(results, 1):
@@ -123,20 +203,31 @@ def format_results(results: list[dict], library_name: str) -> str:
         page = result.get("page_number", "?")
         doc_title = result.get("document_title", "Unknown")
         # Shorten doc title if too long
-        if len(doc_title) > 20:
-            doc_title = doc_title[:17] + "..."
-        content = result.get("content", "").replace("\n", " ")[:60].strip()
+        if len(doc_title) > 30:
+            doc_title = doc_title[:27] + "..."
+        content = result.get("content", "").replace("\n", " ").strip()
 
         if result.get("source_type") == "element":
             has_elements = True
             label = result.get("element_label", "")
-            lines.append(f"[{tag}:{i}] {label} (p.{page}, {doc_title})")
+            elem_type = result.get("element_type", "element")
+            desc = content[:element_limit] + "..." if len(content) > element_limit else content
+            # Format emphasizes result number for LLM accuracy
+            lines.append(f'[RESULT #{i}] {elem_type.upper()} "{label}" (p.{page}, {doc_title})')
+            if desc:
+                lines.append(f"    {desc}")
         else:
-            lines.append(f"[{tag}:{i}] p.{page} {doc_title}: {content}...")
+            desc = content[:text_limit] + "..." if len(content) > text_limit else content
+            lines.append(f"[RESULT #{i}] TEXT p.{page} ({doc_title})")
+            lines.append(f"    {desc}")
 
     if has_elements:
         lines.append("")
-        lines.append("Use `show N` to view images/content")
+        lines.append(
+            "IMPORTANT: Use result numbers (1-{}) with `show N`, not element labels.".format(
+                len(results)
+            )
+        )
 
     return "\n".join(lines)
 
@@ -241,11 +332,14 @@ class LibrarySearchExecutor:
 
         results = data.get("results", [])
 
-        # Cache results for show command using arc as key
-        if self.arc and results:
-            self.cache.store(self.arc, results)
+        # Use hybrid formatting: text for LLM, elements as footer
+        llm_content, element_footer = format_results_hybrid(results, self.name)
 
-        return format_results(results, self.name)
+        # Cache results and footer for show command
+        if self.arc and results:
+            self.cache.store(self.arc, results, element_footer)
+
+        return llm_content
 
 
 # --- Tool Definition ---
@@ -428,5 +522,6 @@ async def search_library_direct(
     if cache and arc and results:
         cache.store(arc, results)
 
-    formatted = format_results(results, name)
+    # Use compact format for direct user display (!l command)
+    formatted = format_results(results, name, compact=True)
     return results, formatted
