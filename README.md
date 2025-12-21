@@ -659,6 +659,82 @@ uv run matrix-llmagent --chronicler "Record: Completed API migration" --arc "pro
 uv run matrix-llmagent --chronicler "Show me the current chapter" --arc "project-x"
 ```
 
+## Deployment
+
+### Running as a Background Service
+
+Start the bot as a background process:
+
+```bash
+cd ~/github/matrix-llmagent
+nohup uv run matrix-llmagent >> ~/matrix-llmagent.log 2>&1 &
+```
+
+### Check if Bot is Running
+
+```bash
+# Check for running process
+pgrep -a -f matrix-llmagent
+
+# View recent logs
+tail -50 ~/matrix-llmagent.log
+```
+
+### Stop the Bot
+
+```bash
+pkill -f 'matrix-llmagent'
+```
+
+### Restart the Bot
+
+```bash
+# Stop, wait, then start
+pkill -f 'matrix-llmagent'
+sleep 2
+cd ~/github/matrix-llmagent
+nohup uv run matrix-llmagent >> ~/matrix-llmagent.log 2>&1 &
+
+# Verify it's running
+sleep 3
+pgrep -a -f matrix-llmagent
+```
+
+### Deploy Updates
+
+```bash
+# Pull latest code
+cd ~/github/matrix-llmagent
+git pull
+
+# Restart the bot
+pkill -f 'matrix-llmagent'
+sleep 2
+nohup uv run matrix-llmagent >> ~/matrix-llmagent.log 2>&1 &
+
+# Verify
+sleep 3
+pgrep -a -f matrix-llmagent
+tail -20 ~/matrix-llmagent.log
+```
+
+### Remote Deployment via SSH
+
+Deploy from your local machine to a remote server:
+
+```bash
+# Pull and restart on remote
+ssh yourserver "cd ~/github/matrix-llmagent && git pull && pkill -f 'matrix-llmagent'; sleep 2; nohup uv run matrix-llmagent >> ~/matrix-llmagent.log 2>&1 &"
+
+# Verify remote bot is running
+ssh yourserver "pgrep -a -f matrix-llmagent"
+
+# Check remote logs
+ssh yourserver "tail -30 ~/matrix-llmagent.log"
+```
+
+**Note**: When using SSH with background processes (`&`), always verify the process started correctly with a separate command.
+
 ## Development
 
 ```bash
