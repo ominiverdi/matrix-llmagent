@@ -115,6 +115,31 @@ def _parse_page_command(message: str) -> tuple[str, int | None] | None:
     return None
 
 
+def _parse_source_command(message: str) -> tuple[str, int | None] | None:
+    """Parse source viewing commands.
+
+    Supports:
+        !sources - list all sources from last search
+        !source N, !source 3 - view source page N
+
+    Returns:
+        Tuple of (command, index) where command is 'list' or 'view'.
+        index is None for list, or the source index for view.
+        Returns None if not a source command.
+    """
+    msg = message.strip().lower()
+
+    if msg == "!sources":
+        return ("list", None)
+
+    # !source N
+    match = re.match(r"^!source\s+(\d+)$", msg)
+    if match:
+        return ("view", int(match.group(1)))
+
+    return None
+
+
 def _truncate_to_words(text: str, max_words: int = DEFAULT_SUMMARY_WORDS) -> str:
     """Truncate text to a maximum number of words.
 
@@ -246,6 +271,13 @@ class MatrixMonitor:
         if page_cmd is not None:
             cmd, page_num = page_cmd
             await self._handle_page_command(room_id, cmd, page_num)
+            return
+
+        # Check for source viewing commands (golden cord)
+        source_cmd = _parse_source_command(message)
+        if source_cmd is not None:
+            cmd, index = source_cmd
+            await self._handle_source_command(room_id, cmd, index)
             return
 
         # Check if message is addressed to us
@@ -542,6 +574,10 @@ class MatrixMonitor:
 - `!prev` - Previous page
 - `!page N` - Jump to page N
 
+**Source Viewing (golden cord - view source pages):**
+- `!sources` - List sources from last search
+- `!source N` - View source page N
+
 **Model Comparison Slots:**{model_slots_text}
 
 **Tools Available:**
@@ -779,6 +815,98 @@ llm-assistant: !l mercator projection
             result.image_data,
             f"page_{result.page_number}.png",
             result.image_mimetype,
+        )
+
+    async def _handle_source_command(self, room_id: str, command: str, index: int | None) -> None:
+        """Handle source viewing commands (!sources, !source N).
+
+        The 'golden cord' - lets users see sources from last search and
+        view the actual source pages.
+
+        Args:
+            room_id: Matrix room ID
+            command: 'list' or 'view'
+            index: Source index for 'view', None for 'list'
+        """
+        from matrix_llmagent.agentic_actor.library_tool import format_sources_list
+
+        lib_config = self.config.get("tools", {}).get("library", {})
+        if not lib_config.get("enabled") or not lib_config.get("base_url"):
+            await self.client.send_message(room_id, "Library is not configured.")
+            return
+
+        cache = getattr(self.agent, "library_cache", None)
+        if cache is None:
+            await self.client.send_message(
+                room_id, "No sources available. Run a library search first."
+            )
+            return
+
+        arc = f"matrix#{room_id}"
+        results = cache.get(arc)
+
+        if command == "list":
+            # Show all sources from last search
+            if not results:
+                await self.client.send_message(
+                    room_id, "No sources available. Run a library search first."
+                )
+                return
+
+            sources_text = format_sources_list(results)
+            await self.client.send_message(room_id, sources_text)
+            return
+
+        # command == "view" - fetch and display source page
+        if not results:
+            await self.client.send_message(
+                room_id, "No sources available. Run a library search first."
+            )
+            return
+
+        if index is None or index < 1 or index > len(results):
+            await self.client.send_message(room_id, f"Invalid source number. Use 1-{len(results)}.")
+            return
+
+        # Get the source result
+        result = results[index - 1]
+        doc_slug = result.get("document_slug")
+        page_num = result.get("page_number")
+        doc_title = result.get("document_title", "Unknown")
+
+        if not doc_slug or not page_num:
+            await self.client.send_message(
+                room_id, "Source is missing document or page information."
+            )
+            return
+
+        # Fetch the page
+        base_url = lib_config["base_url"]
+        await self.client.send_message(room_id, f"Fetching p.{page_num} of '{doc_title}'...")
+
+        page_result = await fetch_library_page(base_url, doc_slug, page_num)
+
+        if isinstance(page_result, str):
+            await self.client.send_message(room_id, f"Error: {page_result}")
+            return
+
+        # Update page view in cache for navigation
+        cache.store_page_view(
+            arc,
+            page_result.document_slug,
+            page_result.document_title,
+            page_result.page_number,
+            page_result.total_pages,
+        )
+
+        # Send caption and image
+        caption = f"Source [{index}]: Page {page_result.page_number} of {page_result.total_pages} - {page_result.document_title}\n\n[!next/!prev to navigate, !sources to list all]"
+        await self.client.send_message(room_id, caption)
+        await self.client.send_image(
+            room_id,
+            page_result.image_data,
+            f"page_{page_result.page_number}.png",
+            page_result.image_mimetype,
         )
 
     async def _handle_library_search(self, room_id: str, query: str) -> None:

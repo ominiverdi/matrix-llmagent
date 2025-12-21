@@ -162,6 +162,46 @@ def get_citation_tag(result: dict) -> str:
     return "t"
 
 
+def format_sources_list(results: list[dict]) -> str:
+    """Format cached search results as a sources list for the golden cord.
+
+    Shows unique (document, page) combinations with content snippets,
+    allowing users to view source pages with !source N.
+
+    Args:
+        results: Cached search results from library search.
+
+    Returns:
+        Formatted string with numbered sources for !source N command.
+    """
+    if not results:
+        return "No sources available. Run a library search first."
+
+    lines = ["**Sources from last search:**", ""]
+
+    for i, result in enumerate(results, 1):
+        doc_title = result.get("document_title", "Unknown")
+        if len(doc_title) > 35:
+            doc_title = doc_title[:32] + "..."
+        page = result.get("page_number", "?")
+        content = result.get("content", "").replace("\n", " ").strip()
+
+        # Shorter snippet for sources list
+        snippet = content[:80] + "..." if len(content) > 80 else content
+
+        if result.get("source_type") == "element":
+            elem_type = result.get("element_type", "element")
+            label = result.get("element_label", "")
+            lines.append(f"  [{i}] {doc_title} p.{page} - {elem_type}: {label}")
+        else:
+            lines.append(f'  [{i}] {doc_title} p.{page} - "{snippet}"')
+
+    lines.append("")
+    lines.append("View source page: `!source N`")
+
+    return "\n".join(lines)
+
+
 # --- Result Formatting ---
 
 
@@ -246,7 +286,7 @@ def format_results(results: list[dict], library_name: str, *, compact: bool = Fa
     text_limit = 150 if compact else 500
 
     lines = [f"**{library_name}** ({len(results)} results)"]
-    lines.append("Results numbered 1-{} for `show N` command:".format(len(results)))
+    lines.append(f"Results numbered 1-{len(results)} for `show N` command:")
 
     has_elements = False
     for i, result in enumerate(results, 1):
@@ -275,9 +315,7 @@ def format_results(results: list[dict], library_name: str, *, compact: bool = Fa
     if has_elements:
         lines.append("")
         lines.append(
-            "IMPORTANT: Use result numbers (1-{}) with `show N`, not element labels.".format(
-                len(results)
-            )
+            f"IMPORTANT: Use result numbers (1-{len(results)}) with `show N`, not element labels."
         )
 
     return "\n".join(lines)

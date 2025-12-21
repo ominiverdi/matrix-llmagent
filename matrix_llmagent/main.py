@@ -14,10 +14,9 @@ from .agentic_actor.library_tool import (
     LibraryResultsCache,
     fetch_library_image,
     fetch_library_page,
+    format_sources_list,
     get_best_image_path,
-    get_citation_tag,
     library_search_tool_def,
-    search_documents,
     search_library_direct,
 )
 from .agentic_actor.tools import (
@@ -290,6 +289,10 @@ Page Navigation (after viewing a document page):
   !prev         - Previous page
   !page N       - Jump to page N
 
+Source Viewing (golden cord - view source pages):
+  !sources      - List sources from last search
+  !source N     - View source page N
+
 Model Comparison Slots:
 {model_slots_text}
 
@@ -515,6 +518,31 @@ def _parse_page_command(message: str) -> tuple[str, int | None] | None:
     return None
 
 
+def _parse_source_command(message: str) -> tuple[str, int | None] | None:
+    """Parse source viewing commands.
+
+    Supports:
+        !sources - list all sources from last search
+        !source N - view source page N
+
+    Returns:
+        Tuple of (command, index) where command is 'list' or 'view'.
+        index is None for list, or the source index for view.
+        Returns None if not a source command.
+    """
+    msg = message.strip().lower()
+
+    if msg == "!sources":
+        return ("list", None)
+
+    # !source N
+    match = re.match(r"^!source\s+(\d+)$", msg)
+    if match:
+        return ("view", int(match.group(1)))
+
+    return None
+
+
 async def _handle_cli_page_command(
     agent: "MatrixLLMAgent",
     command: str,
@@ -587,7 +615,96 @@ async def _handle_cli_page_command(
     if not _render_image_with_chafa(result.image_data, None):
         print("(Page image could not be rendered)")
 
-    print(f"\n[!next/!prev to navigate, !page N to jump]")
+    print("\n[!next/!prev to navigate, !page N to jump]")
+
+
+async def _handle_cli_source_command(
+    agent: "MatrixLLMAgent",
+    command: str,
+    index: int | None,
+    arc: str,
+) -> None:
+    """Handle source viewing commands in CLI mode (!sources, !source N).
+
+    The 'golden cord' - lets users see sources from last search and
+    view the actual source pages.
+
+    Args:
+        agent: MatrixLLMAgent instance with library_cache
+        command: 'list' or 'view'
+        index: Source index for 'view', None for 'list'
+        arc: Arc identifier for cache lookup
+    """
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        print("Library is not configured.")
+        return
+
+    cache = agent.library_cache
+    if cache is None:
+        print("No sources available. Run a library search first.")
+        return
+
+    results = cache.get(arc)
+
+    if command == "list":
+        # Show all sources from last search
+        if not results:
+            print("No sources available. Run a library search first.")
+            return
+
+        sources_text = format_sources_list(results)
+        print(sources_text)
+        return
+
+    # command == "view" - fetch and display source page
+    if not results:
+        print("No sources available. Run a library search first.")
+        return
+
+    if index is None or index < 1 or index > len(results):
+        print(f"Invalid source number. Use 1-{len(results)}.")
+        return
+
+    # Get the source result
+    result = results[index - 1]
+    doc_slug = result.get("document_slug")
+    page_num = result.get("page_number")
+    doc_title = result.get("document_title", "Unknown")
+
+    if not doc_slug or not page_num:
+        print("Source is missing document or page information.")
+        return
+
+    # Fetch the page
+    base_url = lib_config["base_url"]
+    print(f"Fetching p.{page_num} of '{doc_title}'...")
+
+    page_result = await fetch_library_page(base_url, doc_slug, page_num)
+
+    if isinstance(page_result, str):
+        print(f"Error: {page_result}")
+        return
+
+    # Update page view in cache for navigation
+    cache.store_page_view(
+        arc,
+        page_result.document_slug,
+        page_result.document_title,
+        page_result.page_number,
+        page_result.total_pages,
+    )
+
+    # Display with chafa
+    print(
+        f"\nSource [{index}]: Page {page_result.page_number} of {page_result.total_pages} - {page_result.document_title}"
+    )
+    print("-" * 60)
+
+    if not _render_image_with_chafa(page_result.image_data, None):
+        print("(Page image could not be rendered)")
+
+    print("\n[!next/!prev to navigate, !sources to list all]")
 
 
 async def cli_message(message: str, config_path: str | None = None) -> None:
@@ -621,6 +738,13 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         if page_cmd is not None:
             cmd, page_num = page_cmd
             await _handle_cli_page_command(agent, cmd, page_num, "cli#test")
+            return
+
+        # Handle source viewing commands (!sources, !source N)
+        source_cmd = _parse_source_command(message)
+        if source_cmd is not None:
+            cmd, idx = source_cmd
+            await _handle_cli_source_command(agent, cmd, idx, "cli#test")
             return
 
         # Handle !l library search command (direct, no LLM)
@@ -869,6 +993,13 @@ async def cli_interactive(config_path: str | None = None) -> None:
             if page_cmd is not None:
                 cmd, page_num = page_cmd
                 await _handle_cli_page_command(agent, cmd, page_num, arc)
+                continue
+
+            # Handle source viewing commands (!sources, !source N)
+            source_cmd = _parse_source_command(message)
+            if source_cmd is not None:
+                cmd, idx = source_cmd
+                await _handle_cli_source_command(agent, cmd, idx, arc)
                 continue
 
             # Handle !l library search (direct, no LLM)
