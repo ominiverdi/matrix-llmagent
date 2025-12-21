@@ -352,9 +352,15 @@ class MatrixMonitor:
             return
 
         # Handle !l library search (direct, no LLM)
-        if clean_message.startswith("!l ") or clean_message.startswith("!L "):
-            query = clean_message[3:].strip()
-            if query:
+        if (
+            clean_message.lower() == "!l"
+            or clean_message.startswith("!l ")
+            or clean_message.startswith("!L ")
+        ):
+            query = clean_message[2:].strip() if len(clean_message) > 2 else ""
+            if not query or query.lower() == "help":
+                await self._send_library_help(room_id)
+            else:
                 await self._handle_library_search(room_id, query)
             return
 
@@ -607,6 +613,43 @@ llm-assistant: !l mercator projection
 - Use `!l` for quick library search, then `show N` to view images
 - Ask "show me page N of <document>" to browse document pages
 - Use `!next`/`!prev`/`!page N` for quick page navigation"""
+
+        await self.client.send_message(room_id, help_text)
+
+    async def _send_library_help(self, room_id: str) -> None:
+        """Send library-specific help message."""
+        lib_config = self.config.get("tools", {}).get("library", {})
+        lib_name = lib_config.get("name", "Library")
+        lib_description = lib_config.get(
+            "description",
+            "Search scientific documents, view figures, tables, and equations.",
+        )
+
+        help_text = f"""**{lib_name}**
+{lib_description}
+
+**Commands:**
+- `!l <query>` - Search the library
+
+**View Sources (golden cord):**
+- `!sources` - List sources from last search
+- `!source N` - View source page N
+
+**View Elements:**
+- `show N` - View element N (figure/table/equation)
+
+**Page Navigation:**
+- `!next` / `!prev` - Navigate pages
+- `!page N` - Jump to page N
+
+**Examples:**
+```
+!l mercator projection
+!sources
+!source 2
+show 3
+!next
+```"""
 
         await self.client.send_message(room_id, help_text)
 

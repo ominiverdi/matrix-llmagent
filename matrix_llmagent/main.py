@@ -328,6 +328,43 @@ Tips:
 """)
 
 
+def _print_library_help(config: dict[str, Any]) -> None:
+    """Print library-specific help message."""
+    lib_config = config.get("tools", {}).get("library", {})
+    lib_name = lib_config.get("name", "Library")
+    lib_description = lib_config.get(
+        "description",
+        "Search scientific documents, view figures, tables, and equations.",
+    )
+
+    print(f"""
+{lib_name}
+{"=" * len(lib_name)}
+{lib_description}
+
+Commands:
+  !l <query>        - Search the library
+
+View Sources (golden cord):
+  !sources          - List sources from last search
+  !source N         - View source page N
+
+View Elements:
+  show N            - View element N (figure/table/equation)
+
+Page Navigation:
+  !next / !prev     - Navigate pages
+  !page N           - Jump to page N
+
+Examples:
+  !l mercator projection
+  !sources
+  !source 2
+  show 3
+  !next
+""")
+
+
 def _render_image_with_chafa(image_data: bytes, element_type: str | None = None) -> bool:
     """Render image in terminal using chafa.
 
@@ -748,10 +785,10 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
             return
 
         # Handle !l library search command (direct, no LLM)
-        if message.startswith("!l ") or message.startswith("!L "):
-            query = message[3:].strip()
-            if not query:
-                print("Usage: !l <search query>")
+        if message.lower() == "!l" or message.startswith("!l ") or message.startswith("!L "):
+            query = message[2:].strip() if len(message) > 2 else ""
+            if not query or query.lower() == "help":
+                _print_library_help(agent.config)
                 return
 
             lib_config = agent.config.get("tools", {}).get("library", {})
@@ -1003,10 +1040,10 @@ async def cli_interactive(config_path: str | None = None) -> None:
                 continue
 
             # Handle !l library search (direct, no LLM)
-            if message.startswith("!l ") or message.startswith("!L "):
-                query = message[3:].strip()
-                if not query:
-                    print("Usage: !l <search query>")
+            if message.lower() == "!l" or message.startswith("!l ") or message.startswith("!L "):
+                query = message[2:].strip() if len(message) > 2 else ""
+                if not query or query.lower() == "help":
+                    _print_library_help(agent.config)
                     continue
 
                 lib_config = agent.config.get("tools", {}).get("library", {})
