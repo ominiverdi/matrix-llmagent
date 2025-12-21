@@ -237,22 +237,25 @@ class TestLibrarySearchToolDef:
         assert "input_schema" in tool_def
         assert tool_def["persist"] == "summary"
 
-    def test_tool_def_required_properties(self):
-        """Test that query is required."""
+    def test_tool_def_properties(self):
+        """Test that expected properties exist."""
         tool_def = library_search_tool_def("Test Library", "Search test documents.")
         schema = tool_def["input_schema"]
 
         assert "query" in schema["properties"]
-        assert "query" in schema["required"]
-
-    def test_tool_def_optional_properties(self):
-        """Test optional properties exist."""
-        tool_def = library_search_tool_def("Test Library", "Search test documents.")
-        schema = tool_def["input_schema"]
-
+        assert "mode" in schema["properties"]
         assert "document_slug" in schema["properties"]
         assert "element_type" in schema["properties"]
-        assert "element_type" not in schema["required"]
+        # No required fields - query is optional when mode='tour'
+        assert schema["required"] == []
+
+    def test_tool_def_mode_enum(self):
+        """Test that mode has correct enum values."""
+        tool_def = library_search_tool_def("Test Library", "Search test documents.")
+        mode_prop = tool_def["input_schema"]["properties"]["mode"]
+
+        assert mode_prop["type"] == "string"
+        assert mode_prop["enum"] == ["search", "tour"]
 
 
 class TestLibrarySearchExecutor:
@@ -272,6 +275,22 @@ class TestLibrarySearchExecutor:
             arc="test#room",
             name="Test Library",
         )
+
+    @pytest.mark.asyncio
+    async def test_tour_mode(self, executor):
+        """Test that mode='tour' returns the tour text."""
+        result = await executor.execute(mode="tour")
+
+        # Tour text should contain key sections
+        assert "Welcome to the OSGeo Library" in result or "Library tour" in result
+        assert isinstance(result, str)
+
+    @pytest.mark.asyncio
+    async def test_search_without_query(self, executor):
+        """Test that search mode without query returns guidance."""
+        result = await executor.execute()
+
+        assert "search query" in result.lower() or "tour" in result.lower()
 
     @pytest.mark.asyncio
     async def test_successful_search(self, executor, cache):

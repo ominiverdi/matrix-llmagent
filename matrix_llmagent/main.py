@@ -169,7 +169,9 @@ class MatrixLLMAgent:
                 "Results include citation tags like [f:1] for figures, [t:2] for text, [eq:3] for equations, [tb:4] for tables. "
                 "When elements are available, suggest the user can type `show N` to view images.\n"
                 "To show a specific PAGE from a document, use library_search with the page_number parameter. "
-                "Example: library_search(query='snyder', page_number=28) fetches page 28 of the Snyder document."
+                "Example: library_search(query='snyder', page_number=28) fetches page 28 of the Snyder document.\n\n"
+                "IMPORTANT: When answering vague questions about the library (e.g., 'what's in the library?'), "
+                "ALWAYS end your response by mentioning: Type `!l help` for a guided tour."
             )
 
         actor = AgenticLLMActor(
@@ -362,6 +364,8 @@ Examples:
   !source 2
   show 3
   !next
+
+Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY_TOUR.md
 """)
 
 

@@ -125,7 +125,7 @@
             "enabled": false,
             "base_url": "http://localhost:8095",
             "name": "OSGeo Library",
-            "description": "Search scientific documents about map projections, cartography, satellite imagery, and alpine habitat monitoring. Contains figures, tables, and equations from research papers.",
+            "description": "Search scientific documents about map projections, cartography, satellite imagery, and alpine habitat monitoring. Contains figures, tables, and equations from research papers. Type `!l help` for a guided tour.",
             "max_results": 10,
             "cache": {
                 "ttl_hours": 24,

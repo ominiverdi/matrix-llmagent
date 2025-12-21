@@ -649,7 +649,9 @@ llm-assistant: !l mercator projection
 !source 2
 show 3
 !next
-```"""
+```
+
+Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY_TOUR.md"""
 
         await self.client.send_message(room_id, help_text)
 

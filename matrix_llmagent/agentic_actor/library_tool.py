@@ -5,15 +5,35 @@ in the osgeo-library server. Features:
 - Search text chunks and visual elements (figures, tables, equations)
 - Per-room result caching for follow-up `show N` commands
 - Image fetching from the library server
+- Guided tour for new users
 """
 
 import logging
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+# --- Tour Text ---
+
+# Path to the tour file (relative to this module)
+TOUR_FILE_PATH = Path(__file__).parent.parent.parent / "docs" / "LIBRARY_TOUR.md"
+
+
+def load_tour_text() -> str:
+    """Load the library tour text from docs/LIBRARY_TOUR.md."""
+    try:
+        if TOUR_FILE_PATH.exists():
+            return TOUR_FILE_PATH.read_text(encoding="utf-8")
+        else:
+            logger.warning(f"Tour file not found: {TOUR_FILE_PATH}")
+            return "Library tour not available. Try searching with a specific query."
+    except Exception as e:
+        logger.error(f"Failed to load tour file: {e}")
+        return "Library tour not available. Try searching with a specific query."
 
 
 # --- Cache ---
@@ -363,27 +383,38 @@ class LibrarySearchExecutor:
 
     async def execute(
         self,
-        query: str,
+        query: str | None = None,
+        mode: str | None = None,
         document_slug: str | None = None,
         element_type: str | None = None,
         limit: int | None = None,
         page_number: int | None = None,
     ) -> str | list[dict]:
-        """Execute a library search or fetch a page.
+        """Execute a library search, fetch a page, or return the guided tour.
 
         Args:
             query: Search query string. Also used for document name matching when page_number is set.
+            mode: Operation mode - 'search' (default) or 'tour' for guided tour.
             document_slug: Filter to specific document (optional).
             element_type: Filter by element type: figure, table, equation (optional).
             limit: Maximum number of results (optional, uses max_results default).
             page_number: If set, fetch this page instead of searching (1-indexed).
 
         Returns:
-            Formatted string with search results, or list with image content block for pages.
+            Formatted string with search results, tour text, or list with image content block for pages.
         """
+        # Handle tour mode
+        if mode == "tour":
+            logger.info(f"Returning library tour for arc {self.arc}")
+            return load_tour_text()
+
         # Handle page request
         if page_number is not None:
-            return await self._execute_page_request(query, document_slug, page_number)
+            return await self._execute_page_request(query or "", document_slug, page_number)
+
+        # For search mode, query is required
+        if not query:
+            return "Please provide a search query, or use mode='tour' for a guided tour."
 
         # Regular search
         limit = limit or self.max_results
@@ -535,7 +566,12 @@ def library_search_tool_def(name: str, description: str) -> dict:
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": f"Search query for {name}. Use specific terms related to the document content. Also used to find documents by name when page_number is specified.",
+                    "description": f"Search query for {name}. Use specific terms related to the document content. Also used to find documents by name when page_number is specified. Required for 'search' mode, ignored for 'tour' mode.",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["search", "tour"],
+                    "description": "Mode of operation. 'search' (default): search the library. 'tour': return a guided tour explaining how to use the library.",
                 },
                 "document_slug": {
                     "type": "string",
@@ -551,7 +587,7 @@ def library_search_tool_def(name: str, description: str) -> dict:
                     "description": "Optional: fetch a full page image instead of searching. Use with document_slug or query to identify the document. Page numbers are 1-indexed.",
                 },
             },
-            "required": ["query"],
+            "required": [],
         },
         "persist": "summary",
     }
