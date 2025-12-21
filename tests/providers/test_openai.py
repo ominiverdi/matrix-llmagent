@@ -379,21 +379,13 @@ class TestOpenAIImageHandling:
         result = client.format_tool_results(tool_results)
 
         assert isinstance(result, list)
-        assert len(result) == 2  # Tool result + image message
+        assert len(result) == 1  # Tool result only (images stripped)
 
-        # Check tool result
+        # Check tool result - image replaced with [Image] placeholder
         tool_result = result[0]
         assert tool_result["role"] == "tool"
         assert tool_result["tool_call_id"] == "test-123"
-        assert "Images returned by tool" in tool_result["content"]
-
-        # Check image message
-        image_msg = result[1]
-        assert image_msg["role"] == "user"
-        assert len(image_msg["content"]) == 2  # Text + image
-        assert image_msg["content"][0]["type"] == "text"
-        assert image_msg["content"][1]["type"] == "image_url"
-        assert f"data:image/png;base64,{image_b64}" in image_msg["content"][1]["image_url"]["url"]
+        assert "[Image]" in tool_result["content"]
 
     def test_openai_plain_text_formatting(self):
         """Test OpenAI client formats plain text tool results correctly."""

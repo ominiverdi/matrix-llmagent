@@ -363,39 +363,34 @@ class BaseOpenAIClient(BaseAPIClient):
         return text_content, image_parts
 
     def format_tool_results(self, tool_results: list[dict]) -> list[dict]:
-        """Format tool results for Chat Completion API as tool messages."""
+        """Format tool results for Chat Completion API as tool messages.
+
+        Images are stripped and replaced with [Image] placeholder since most models
+        don't support vision in tool results. The image_callback mechanism handles
+        displaying images to users separately.
+        """
         processed_results = []
-        accumulated_images = []
 
         for result in tool_results:
             content = result["content"]
 
             # Handle plain strings vs Anthropic content blocks
             if isinstance(content, str):
-                text = content
-                images = []
+                tool_content = content
+            elif isinstance(content, list):
+                # Anthropic content blocks - convert to string, strip images
+                parts = []
+                for block in content:
+                    if block.get("type") == "text":
+                        parts.append(block.get("text", ""))
+                    elif block.get("type") == "image":
+                        parts.append("[Image]")
+                tool_content = "".join(parts)
             else:
-                # Content is Anthropic blocks, convert to OpenAI format
-                text, images = self._split_blocks_to_openai(content)
+                tool_content = str(content)
 
-            # Tool message must have text content
-            tool_content = text or ("Images returned by tool." if images else "")
             processed_results.append(
                 {"role": "tool", "tool_call_id": result["tool_use_id"], "content": tool_content}
-            )
-
-            accumulated_images.extend(images)
-
-        # Add image message if there are images
-        if accumulated_images:
-            processed_results.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Here are the images from the tool results:"}
-                    ]
-                    + accumulated_images,
-                }
             )
 
         return processed_results
