@@ -9,6 +9,7 @@ from nio import MatrixRoom, RoomMessageText
 from .agentic_actor.library_tool import (
     LibraryResultsCache,
     fetch_library_image,
+    fetch_library_page,
     get_best_image_path,
     get_citation_tag,
     search_library_direct,
@@ -85,6 +86,33 @@ def _parse_show_command(message: str) -> list[int] | None:
     # Extract all numbers from the argument
     indices = [int(x) for x in re.findall(r"\d+", match.group(1))]
     return indices if indices else None
+
+
+def _parse_page_command(message: str) -> tuple[str, int | None] | None:
+    """Parse page navigation commands.
+
+    Supports:
+        !next, !prev - navigate relative to current page
+        !page 50, !page50 - jump to specific page
+
+    Returns:
+        Tuple of (command, page_number) where command is 'next', 'prev', or 'goto'.
+        page_number is None for next/prev, or the target page for goto.
+        Returns None if not a page command.
+    """
+    msg = message.strip().lower()
+
+    if msg in ("!next", "!n"):
+        return ("next", None)
+    if msg in ("!prev", "!p", "!previous"):
+        return ("prev", None)
+
+    # !page N or !pageN
+    match = re.match(r"^!page\s*(\d+)$", msg)
+    if match:
+        return ("goto", int(match.group(1)))
+
+    return None
 
 
 def _truncate_to_words(text: str, max_words: int = DEFAULT_SUMMARY_WORDS) -> str:
@@ -211,6 +239,13 @@ class MatrixMonitor:
         show_indices = _parse_show_command(message)
         if show_indices is not None:
             await self._handle_show_command(room_id, show_indices)
+            return
+
+        # Check for page navigation commands (works without addressing the bot)
+        page_cmd = _parse_page_command(message)
+        if page_cmd is not None:
+            cmd, page_num = page_cmd
+            await self._handle_page_command(room_id, cmd, page_num)
             return
 
         # Check if message is addressed to us
@@ -360,6 +395,15 @@ class MatrixMonitor:
                 " Keep responses to 1 sentence max. Users can say 'tell me more' for details."
             )
 
+        # Image callback for Matrix - upload to room
+        async def matrix_image_callback(image_bytes: bytes, mimetype: str) -> None:
+            await self.client.send_image(
+                room_id,
+                image_bytes,
+                f"page.{mimetype.split('/')[-1]}",
+                mimetype,
+            )
+
         # Run actor
         try:
             response = await self.agent.run_actor(
@@ -367,6 +411,7 @@ class MatrixMonitor:
                 mode_cfg=mode_cfg,
                 system_prompt=system_prompt,
                 arc=f"matrix#{room_id}",
+                image_callback=matrix_image_callback,
             )
 
             if response:
@@ -492,6 +537,11 @@ class MatrixMonitor:
 - `!v <message>` - Verbose mode - get detailed responses instead of concise ones
 - `!h` - Show this help message
 
+**Page Navigation (after viewing a document page):**
+- `!next` - Next page
+- `!prev` - Previous page
+- `!page N` - Jump to page N
+
 **Model Comparison Slots:**{model_slots_text}
 
 **Tools Available:**
@@ -518,7 +568,9 @@ llm-assistant: !l mercator projection
 - Use `!v` prefix when you need a comprehensive answer upfront
 - Use `!a` for complex research that needs multiple steps
 - Use `!d` when you want fun, sarcastic responses
-- Use `!l` for quick library search, then `show N` to view images"""
+- Use `!l` for quick library search, then `show N` to view images
+- Ask "show me page N of <document>" to browse document pages
+- Use `!next`/`!prev`/`!page N` for quick page navigation"""
 
         await self.client.send_message(room_id, help_text)
 
@@ -644,6 +696,90 @@ llm-assistant: !l mercator projection
                     room_id,
                     f"Error fetching image for [{tag}:{idx}]: {e}",
                 )
+
+    async def _handle_page_command(
+        self, room_id: str, command: str, page_number: int | None
+    ) -> None:
+        """Handle page navigation commands (!next, !prev, !page N).
+
+        Args:
+            room_id: Matrix room ID
+            command: 'next', 'prev', or 'goto'
+            page_number: Target page for 'goto', None for relative navigation
+        """
+        lib_config = self.config.get("tools", {}).get("library", {})
+        if not lib_config.get("enabled") or not lib_config.get("base_url"):
+            await self.client.send_message(room_id, "Library is not configured.")
+            return
+
+        cache = getattr(self.agent, "library_cache", None)
+        if cache is None:
+            await self.client.send_message(
+                room_id, "No document open. Use library_search with page_number first."
+            )
+            return
+
+        # Get current page view
+        arc = f"matrix#{room_id}"
+        page_view = cache.get_page_view(arc)
+        if page_view is None:
+            await self.client.send_message(
+                room_id, "No document open. Try: 'show me page 1 of <document name>'"
+            )
+            return
+
+        # Calculate target page
+        if command == "next":
+            target_page = page_view.page + 1
+        elif command == "prev":
+            target_page = page_view.page - 1
+        else:  # goto
+            target_page = page_number or 1
+
+        # Bounds check
+        if target_page < 1:
+            await self.client.send_message(
+                room_id,
+                f"Already at first page (page 1 of {page_view.total_pages}).",
+            )
+            return
+        if target_page > page_view.total_pages:
+            await self.client.send_message(
+                room_id,
+                f"Already at last page (page {page_view.total_pages} of {page_view.total_pages}).",
+            )
+            return
+
+        # Fetch the page
+        base_url = lib_config["base_url"]
+        await self.client.send_message(
+            room_id, f"Fetching page {target_page} of '{page_view.document_title}'..."
+        )
+
+        result = await fetch_library_page(base_url, page_view.document_slug, target_page)
+
+        if isinstance(result, str):
+            await self.client.send_message(room_id, f"Error: {result}")
+            return
+
+        # Update page view in cache
+        cache.store_page_view(
+            arc,
+            result.document_slug,
+            result.document_title,
+            result.page_number,
+            result.total_pages,
+        )
+
+        # Send caption first, then image
+        caption = f"Page {result.page_number} of {result.total_pages}: {result.document_title}\n\n[!next/!prev to navigate, !page N to jump]"
+        await self.client.send_message(room_id, caption)
+        await self.client.send_image(
+            room_id,
+            result.image_data,
+            f"page_{result.page_number}.png",
+            result.image_mimetype,
+        )
 
     async def _handle_library_search(self, room_id: str, query: str) -> None:
         """Handle !l library search command (direct, no LLM).

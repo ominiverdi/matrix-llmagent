@@ -76,9 +76,17 @@ class AgenticLLMActor:
         context: list[dict],
         *,
         progress_callback: Callable[[str, str], Awaitable[None]] | None = None,
+        image_callback: Callable[[bytes, str], Awaitable[None]] | None = None,
         arc: str,
     ) -> str:
-        """Run the agent with tool-calling loop."""
+        """Run the agent with tool-calling loop.
+
+        Args:
+            context: Conversation context messages.
+            progress_callback: Called with (title, content) for progress updates.
+            image_callback: Called with (image_bytes, mimetype) when tools return images.
+            arc: Arc identifier for caching.
+        """
         messages: list[dict[str, Any]] = copy.deepcopy(self.prepended_context) + copy.deepcopy(
             context
         )
@@ -316,6 +324,20 @@ class AgenticLLMActor:
                                         log_blocks.append(
                                             f"[image: {source.get('media_type')}, {truncated}]"
                                         )
+                                        # Call image callback to display the image
+                                        if image_callback and source.get("type") == "base64":
+                                            import base64 as b64
+
+                                            try:
+                                                image_bytes = b64.b64decode(data)
+                                                await image_callback(
+                                                    image_bytes,
+                                                    source.get("media_type", "image/png"),
+                                                )
+                                            except Exception as e:
+                                                logger.warning(
+                                                    f"Failed to decode image for callback: {e}"
+                                                )
                                     elif block.get("type") == "text":
                                         log_blocks.append(block.get("text", "")[:100])
                                 log_result = ", ".join(log_blocks)

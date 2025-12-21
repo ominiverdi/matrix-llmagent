@@ -28,6 +28,17 @@ class CachedResults:
     element_footer: str | None = None  # Footer with element references for hybrid mode
 
 
+@dataclass
+class LastPageView:
+    """Tracks the last viewed page for navigation shortcuts."""
+
+    document_slug: str
+    document_title: str
+    page: int
+    total_pages: int
+    timestamp: float
+
+
 class LibraryResultsCache:
     """Per-room cache for library search results with TTL and LRU eviction."""
 
@@ -41,6 +52,7 @@ class LibraryResultsCache:
         self.ttl_seconds = ttl_hours * 3600
         self.max_rooms = max_rooms
         self._cache: dict[str, CachedResults] = {}
+        self._page_views: dict[str, LastPageView] = {}  # Per-arc page navigation state
 
     def store(self, room_id: str, results: list[dict], element_footer: str | None = None) -> None:
         """Store search results for a room."""
@@ -92,6 +104,45 @@ class LibraryResultsCache:
     def _is_expired(self, entry: CachedResults) -> bool:
         """Check if a cache entry has expired."""
         return time.time() - entry.timestamp > self.ttl_seconds
+
+    # --- Page Navigation State ---
+
+    def store_page_view(
+        self,
+        arc: str,
+        document_slug: str,
+        document_title: str,
+        page: int,
+        total_pages: int,
+    ) -> None:
+        """Store the current page view for navigation shortcuts."""
+        self._page_views[arc] = LastPageView(
+            document_slug=document_slug,
+            document_title=document_title,
+            page=page,
+            total_pages=total_pages,
+            timestamp=time.time(),
+        )
+        logger.debug(f"Stored page view for {arc}: {document_slug} p.{page}/{total_pages}")
+
+    def get_page_view(self, arc: str) -> LastPageView | None:
+        """Get the current page view for an arc. Returns None if not found or expired."""
+        view = self._page_views.get(arc)
+        if view is None:
+            return None
+
+        # Use same TTL as search results
+        if time.time() - view.timestamp > self.ttl_seconds:
+            del self._page_views[arc]
+            logger.debug(f"Page view expired for {arc}")
+            return None
+
+        return view
+
+    def clear_page_view(self, arc: str) -> None:
+        """Clear the page view for an arc."""
+        if arc in self._page_views:
+            del self._page_views[arc]
 
 
 # --- Citation Tags ---
@@ -278,18 +329,25 @@ class LibrarySearchExecutor:
         document_slug: str | None = None,
         element_type: str | None = None,
         limit: int | None = None,
-    ) -> str:
-        """Execute a library search.
+        page_number: int | None = None,
+    ) -> str | list[dict]:
+        """Execute a library search or fetch a page.
 
         Args:
-            query: Search query string.
+            query: Search query string. Also used for document name matching when page_number is set.
             document_slug: Filter to specific document (optional).
             element_type: Filter by element type: figure, table, equation (optional).
             limit: Maximum number of results (optional, uses max_results default).
+            page_number: If set, fetch this page instead of searching (1-indexed).
 
         Returns:
-            Formatted string with search results.
+            Formatted string with search results, or list with image content block for pages.
         """
+        # Handle page request
+        if page_number is not None:
+            return await self._execute_page_request(query, document_slug, page_number)
+
+        # Regular search
         limit = limit or self.max_results
 
         # Build request payload
@@ -341,6 +399,82 @@ class LibrarySearchExecutor:
 
         return llm_content
 
+    async def _execute_page_request(
+        self,
+        query: str,
+        document_slug: str | None,
+        page_number: int,
+    ) -> str | list[dict]:
+        """Fetch a specific page from a document.
+
+        Args:
+            query: Document name query (used if document_slug not provided).
+            document_slug: Direct document slug (preferred if known).
+            page_number: Page number to fetch (1-indexed).
+
+        Returns:
+            List with image content block for the model, or error string.
+        """
+        import base64
+
+        # Resolve document slug if not provided
+        if not document_slug:
+            docs = await search_documents(self.base_url, query, limit=5)
+            if isinstance(docs, str):
+                return docs  # Error message
+
+            if not docs:
+                return f"No documents found matching '{query}'."
+
+            if len(docs) == 1:
+                document_slug = docs[0]["slug"]
+            else:
+                # Multiple matches - ask user to clarify
+                doc_list = "\n".join(
+                    f"  - {d['slug']}: {d['title']} ({d['total_pages']} pages)" for d in docs
+                )
+                return (
+                    f"Multiple documents match '{query}'. Please specify document_slug:\n{doc_list}"
+                )
+
+        # At this point document_slug is guaranteed to be set
+        assert document_slug is not None
+
+        # Fetch the page
+        result = await fetch_library_page(self.base_url, document_slug, page_number)
+
+        if isinstance(result, str):
+            return result  # Error message
+
+        # Store page view for navigation
+        if self.arc:
+            self.cache.store_page_view(
+                self.arc,
+                result.document_slug,
+                result.document_title,
+                result.page_number,
+                result.total_pages,
+            )
+
+        # Return image as content block for the model (Anthropic format)
+        image_b64 = base64.b64encode(result.image_data).decode("utf-8")
+
+        return [
+            {
+                "type": "text",
+                "text": f"Page {result.page_number} of {result.total_pages} from '{result.document_title}'. "
+                f"User can say 'next page' or 'prev page' to navigate, or use !next/!prev shortcuts.",
+            },
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": result.image_mimetype,
+                    "data": image_b64,
+                },
+            },
+        ]
+
 
 # --- Tool Definition ---
 
@@ -363,7 +497,7 @@ def library_search_tool_def(name: str, description: str) -> dict:
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": f"Search query for {name}. Use specific terms related to the document content.",
+                    "description": f"Search query for {name}. Use specific terms related to the document content. Also used to find documents by name when page_number is specified.",
                 },
                 "document_slug": {
                     "type": "string",
@@ -373,6 +507,10 @@ def library_search_tool_def(name: str, description: str) -> dict:
                     "type": "string",
                     "enum": ["figure", "table", "equation"],
                     "description": "Optional: filter results to a specific element type.",
+                },
+                "page_number": {
+                    "type": "integer",
+                    "description": "Optional: fetch a full page image instead of searching. Use with document_slug or query to identify the document. Page numbers are 1-indexed.",
                 },
             },
             "required": ["query"],
@@ -453,6 +591,142 @@ def get_best_image_path(result: dict) -> str | None:
             return rendered
 
     return result.get("crop_path") or None
+
+
+# --- Document Search ---
+
+
+async def search_documents(
+    base_url: str,
+    query: str,
+    limit: int = 20,
+    timeout: int = 30,
+) -> list[dict] | str:
+    """Search for documents by title/slug/filename.
+
+    Args:
+        base_url: Base URL of the osgeo-library server.
+        query: Search query (partial match on title, slug, or filename).
+        limit: Maximum number of results.
+        timeout: HTTP request timeout in seconds.
+
+    Returns:
+        List of document dicts with slug, title, source_file, total_pages.
+        Returns error string if request failed.
+    """
+    try:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"{base_url.rstrip('/')}/documents/search",
+                json={"query": query, "limit": limit},
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as response,
+        ):
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error(f"Document search failed: {response.status} - {error_text}")
+                return f"Document search failed (HTTP {response.status})."
+
+            data = await response.json()
+            return data.get("results", [])
+
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"Cannot connect to library server for document search: {e}")
+        return "Cannot connect to library server."
+    except TimeoutError:
+        logger.error(f"Document search timed out after {timeout}s")
+        return "Document search timed out."
+    except Exception as e:
+        logger.error(f"Document search error: {e}")
+        return f"Document search error: {e}"
+
+
+# --- Page Fetching ---
+
+
+@dataclass
+class PageResult:
+    """Result from fetching a document page."""
+
+    document_slug: str
+    document_title: str
+    page_number: int
+    total_pages: int
+    image_data: bytes
+    image_mimetype: str
+    image_width: int
+    image_height: int
+
+
+async def fetch_library_page(
+    base_url: str,
+    document_slug: str,
+    page_number: int,
+    timeout: int = 60,
+) -> PageResult | str:
+    """Fetch a full page image from the library server.
+
+    Args:
+        base_url: Base URL of the osgeo-library server.
+        document_slug: Document identifier.
+        page_number: Page number (1-indexed).
+        timeout: HTTP request timeout in seconds (higher for large pages).
+
+    Returns:
+        PageResult with image data and metadata, or error string.
+    """
+    import base64
+
+    url = f"{base_url.rstrip('/')}/page/{document_slug}/{page_number}"
+
+    try:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as response,
+        ):
+            if response.status == 404:
+                data = await response.json()
+                error_msg = data.get("message", data.get("detail", "Not found"))
+                return error_msg
+
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error(f"Failed to fetch page: {response.status} - {error_text}")
+                return f"Failed to fetch page (HTTP {response.status})."
+
+            data = await response.json()
+
+            # Decode base64 image data (API returns "image_base64")
+            image_b64 = data.get("image_base64", data.get("image_data", ""))
+            if not image_b64:
+                return "Page response missing image data."
+
+            image_bytes = base64.b64decode(image_b64)
+
+            return PageResult(
+                document_slug=data.get("document_slug", document_slug),
+                document_title=data.get("document_title", "Unknown"),
+                page_number=data.get("page_number", page_number),
+                total_pages=data.get("total_pages", 0),
+                image_data=image_bytes,
+                image_mimetype=data.get("mime_type", data.get("image_mimetype", "image/png")),
+                image_width=data.get("image_width", 0),
+                image_height=data.get("image_height", 0),
+            )
+
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"Cannot connect to library server for page: {e}")
+        return "Cannot connect to library server."
+    except TimeoutError:
+        logger.error(f"Page fetch timed out after {timeout}s")
+        return "Page fetch timed out. Try again."
+    except Exception as e:
+        logger.error(f"Page fetch error: {e}")
+        return f"Page fetch error: {e}"
 
 
 # --- Direct Search (for !l mode) ---

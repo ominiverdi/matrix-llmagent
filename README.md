@@ -436,6 +436,53 @@ Bot: [Searches knowledge_base for "strk"]
      OSGeo contributor involved in PostGIS and infrastructure projects...
 ```
 
+### Library Search (`library_search`)
+Search and browse scientific documents (PDFs) with semantic search over text, figures, tables, and equations. Includes full page image browsing with navigation.
+
+**Features:**
+- Semantic search over document content
+- Visual element search (figures, tables, equations)
+- Full page image viewing with `page_number` parameter
+- Page navigation shortcuts: `!next`, `!prev`, `!page N`
+- Document fuzzy search by title/author
+
+**Configuration:**
+```json
+{
+  "tools": {
+    "library": {
+      "enabled": true,
+      "base_url": "http://localhost:8095",
+      "name": "My Library",
+      "description": "Search scientific documents about your topic.",
+      "max_results": 10,
+      "cache": {
+        "ttl_hours": 24,
+        "max_rooms": 100
+      }
+    }
+  }
+}
+```
+
+**Requires:** An [osgeo-library](https://github.com/osgeo/osgeo-library) server instance with the `/search`, `/page`, and `/documents/search` endpoints.
+
+**Example:**
+```
+User: show me page 29 of Snyder
+Bot: [Fetches page 29 from "Map Projections: A Working Manual"]
+     [Displays page image]
+     Page 29 of 397 from 'Map Projections'. Say 'next page' or use !next to navigate.
+
+User: !next
+Bot: [Fetches page 30]
+     [Displays page image]
+
+User: search for polyconic projection equations
+Bot: [Searches library, returns figures and equations]
+     Found 5 results. Type 'show 1' to view figures.
+```
+
 ### Other Agent Tools
 
 - **`get_time`** - Get current time in any timezone (e.g., "America/Los_Angeles", "Europe/London")
@@ -496,6 +543,7 @@ Long bot responses can optionally be wrapped in a collapsible `<details>` tag fo
 | `generate_image` | Yes | Paid | OpenRouter account |
 | `share_artifact` | No | Free | Configure local path + URL |
 | `knowledge_base` | No | Free | PostgreSQL database ([schema](docs/KNOWLEDGE_BASE.md)) |
+| `library_search` | No | Free | osgeo-library server |
 
 **Note:** For llama.cpp models to support tools, start the server with `--jinja` flag:
 ```bash

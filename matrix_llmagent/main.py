@@ -13,9 +13,11 @@ from .agentic_actor import AgenticLLMActor
 from .agentic_actor.library_tool import (
     LibraryResultsCache,
     fetch_library_image,
+    fetch_library_page,
     get_best_image_path,
     get_citation_tag,
     library_search_tool_def,
+    search_documents,
     search_library_direct,
 )
 from .agentic_actor.tools import (
@@ -131,6 +133,7 @@ class MatrixLLMAgent:
         system_prompt: str,
         arc: str = "",
         progress_callback=None,
+        image_callback=None,
         model: str | list[str] | None = None,
         **actor_kwargs,
     ) -> str | None:
@@ -165,7 +168,9 @@ class MatrixLLMAgent:
                 f"{lib_description}\n"
                 "Use library_search for questions about scientific documents, map projections, equations, figures, and tables. "
                 "Results include citation tags like [f:1] for figures, [t:2] for text, [eq:3] for equations, [tb:4] for tables. "
-                "When elements are available, suggest the user can type `show N` to view images."
+                "When elements are available, suggest the user can type `show N` to view images.\n"
+                "To show a specific PAGE from a document, use library_search with the page_number parameter. "
+                "Example: library_search(query='snyder', page_number=28) fetches page 28 of the Snyder document."
             )
 
         actor = AgenticLLMActor(
@@ -183,6 +188,7 @@ class MatrixLLMAgent:
         response = await actor.run_agent(
             context,
             progress_callback=progress_callback,
+            image_callback=image_callback,
             arc=arc,
         )
 
@@ -279,6 +285,11 @@ Modes:
   !v <message>  - Verbose mode - get detailed responses instead of concise ones
   !h            - Show this help message
 
+Page Navigation (after viewing a document page):
+  !next         - Next page
+  !prev         - Previous page
+  !page N       - Jump to page N
+
 Model Comparison Slots:
 {model_slots_text}
 
@@ -309,6 +320,8 @@ Tips:
   - Use !a for complex research that needs multiple steps
   - Use !d when you want fun, sarcastic responses
   - Use !l for quick library search, then `show N` to view images
+  - Ask "show me page N of <document>" to browse document pages
+  - Use !next/!prev/!page N for quick page navigation
 """)
 
 
@@ -475,6 +488,108 @@ async def _handle_cli_show_command(
             print(f"Error fetching image: {e}")
 
 
+def _parse_page_command(message: str) -> tuple[str, int | None] | None:
+    """Parse page navigation commands.
+
+    Supports:
+        !next, !prev - navigate relative to current page
+        !page 50, !page50 - jump to specific page
+
+    Returns:
+        Tuple of (command, page_number) where command is 'next', 'prev', or 'goto'.
+        page_number is None for next/prev, or the target page for goto.
+        Returns None if not a page command.
+    """
+    msg = message.strip().lower()
+
+    if msg in ("!next", "!n"):
+        return ("next", None)
+    if msg in ("!prev", "!p", "!previous"):
+        return ("prev", None)
+
+    # !page N or !pageN
+    match = re.match(r"^!page\s*(\d+)$", msg)
+    if match:
+        return ("goto", int(match.group(1)))
+
+    return None
+
+
+async def _handle_cli_page_command(
+    agent: "MatrixLLMAgent",
+    command: str,
+    page_number: int | None,
+    arc: str,
+) -> None:
+    """Handle page navigation commands in CLI mode.
+
+    Args:
+        agent: MatrixLLMAgent instance with library_cache
+        command: 'next', 'prev', or 'goto'
+        page_number: Target page for 'goto', None for relative navigation
+        arc: Arc identifier for cache lookup
+    """
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        print("Library is not configured.")
+        return
+
+    cache = agent.library_cache
+    if cache is None:
+        print("No document open. Use library_search with page_number first.")
+        return
+
+    # Get current page view
+    page_view = cache.get_page_view(arc)
+    if page_view is None:
+        print("No document open. Try: 'show me page 1 of <document name>'")
+        return
+
+    # Calculate target page
+    if command == "next":
+        target_page = page_view.page + 1
+    elif command == "prev":
+        target_page = page_view.page - 1
+    else:  # goto
+        target_page = page_number or 1
+
+    # Bounds check
+    if target_page < 1:
+        print(f"Already at first page (page 1 of {page_view.total_pages}).")
+        return
+    if target_page > page_view.total_pages:
+        print(f"Already at last page (page {page_view.total_pages} of {page_view.total_pages}).")
+        return
+
+    # Fetch the page
+    base_url = lib_config["base_url"]
+    print(f"Fetching page {target_page} of '{page_view.document_title}'...")
+
+    result = await fetch_library_page(base_url, page_view.document_slug, target_page)
+
+    if isinstance(result, str):
+        print(f"Error: {result}")
+        return
+
+    # Update page view in cache
+    cache.store_page_view(
+        arc,
+        result.document_slug,
+        result.document_title,
+        result.page_number,
+        result.total_pages,
+    )
+
+    # Display with chafa
+    print(f"\nPage {result.page_number} of {result.total_pages}: {result.document_title}")
+    print("-" * 60)
+
+    if not _render_image_with_chafa(result.image_data, None):
+        print("(Page image could not be rendered)")
+
+    print(f"\n[!next/!prev to navigate, !page N to jump]")
+
+
 async def cli_message(message: str, config_path: str | None = None) -> None:
     """CLI mode for testing message handling including command parsing."""
     # Load configuration
@@ -499,6 +614,13 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         show_indices = _parse_show_indices(message)
         if show_indices is not None:
             await _handle_cli_show_command(agent, show_indices)
+            return
+
+        # Handle page navigation commands (!next, !prev, !page N)
+        page_cmd = _parse_page_command(message)
+        if page_cmd is not None:
+            cmd, page_num = page_cmd
+            await _handle_cli_page_command(agent, cmd, page_num, "cli#test")
             return
 
         # Handle !l library search command (direct, no LLM)
@@ -742,6 +864,13 @@ async def cli_interactive(config_path: str | None = None) -> None:
                 await _handle_cli_show_command(agent, show_indices, arc)
                 continue
 
+            # Handle page navigation commands (!next, !prev, !page N)
+            page_cmd = _parse_page_command(message)
+            if page_cmd is not None:
+                cmd, page_num = page_cmd
+                await _handle_cli_page_command(agent, cmd, page_num, arc)
+                continue
+
             # Handle !l library search (direct, no LLM)
             if message.startswith("!l ") or message.startswith("!L "):
                 query = message[3:].strip()
@@ -849,6 +978,11 @@ async def cli_interactive(config_path: str | None = None) -> None:
                     " Keep responses to 1 sentence max. Users can say 'tell me more' for details."
                 )
 
+            # Image callback for CLI - render with chafa
+            async def cli_image_callback(image_bytes: bytes, mimetype: str) -> None:
+                print()  # Blank line before image
+                _render_image_with_chafa(image_bytes, None)
+
             # Run actor
             try:
                 response = await agent.run_actor(
@@ -856,6 +990,7 @@ async def cli_interactive(config_path: str | None = None) -> None:
                     mode_cfg=mode_cfg,
                     system_prompt=system_prompt,
                     arc=arc,
+                    image_callback=cli_image_callback,
                 )
 
                 if response:
