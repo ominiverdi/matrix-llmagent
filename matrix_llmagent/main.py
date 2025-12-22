@@ -326,6 +326,9 @@ Source Viewing (golden cord - view source pages):
   !sources      - List sources from last search
   !source N     - View source page N
 
+Session:
+  !clear        - Clear chat history and all caches (start fresh)
+
 Model Comparison Slots:
 {model_slots_text}
 
@@ -1149,6 +1152,25 @@ async def cli_interactive(config_path: str | None = None) -> None:
                 _print_cli_help(agent.config)
                 continue
 
+            # Handle clear command - reset history and caches
+            if message.lower() in ("!clear", "!reset"):
+                # Clear chat history for this arc
+                await agent.history.clear_arc("cli", "interactive")
+                # Clear all caches
+                if agent.library_cache:
+                    agent.library_cache.clear(arc)
+                if agent.kb_cache:
+                    agent.kb_cache.clear(arc)
+                if agent.web_search_cache:
+                    agent.web_search_cache.clear(arc)
+                # Clear page view state
+                if hasattr(agent, "_cli_page_view"):
+                    delattr(agent, "_cli_page_view")
+                print(
+                    "Cleared: chat history, library cache, KB cache, web search cache, page state"
+                )
+                continue
+
             # Handle show command
             show_indices = _parse_show_indices(message)
             if show_indices is not None:
@@ -1301,8 +1323,9 @@ async def cli_interactive(config_path: str | None = None) -> None:
                     print(response)
 
                     # Save to history (same as Matrix)
+                    # nick="user", mynick=bot_name so user messages get role="user"
                     await agent.history.add_message(
-                        "cli", "interactive", clean_message, "user", "user"
+                        "cli", "interactive", clean_message, "user", bot_name
                     )
                     await agent.history.add_message(
                         "cli", "interactive", response, bot_name, bot_name, True

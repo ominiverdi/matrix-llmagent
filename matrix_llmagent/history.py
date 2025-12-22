@@ -87,6 +87,27 @@ class ChatHistory:
 
         logger.debug(f"Added message to history: {server_tag}/{channel_name} - {nick}: {message}")
 
+    async def clear_arc(self, server_tag: str, channel_name: str) -> int:
+        """Clear all messages for a specific arc (server/channel combination).
+
+        Args:
+            server_tag: Server identifier.
+            channel_name: Channel/room name.
+
+        Returns:
+            Number of messages deleted.
+        """
+        async with self._lock, aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "DELETE FROM chat_messages WHERE server_tag = ? AND channel_name = ?",
+                (server_tag, channel_name),
+            )
+            deleted = cursor.rowcount
+            await db.commit()
+
+        logger.info(f"Cleared {deleted} messages from history: {server_tag}/{channel_name}")
+        return deleted
+
     async def get_context(
         self, server_tag: str, channel_name: str, limit: int | None = None
     ) -> list[dict[str, str]]:
