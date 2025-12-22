@@ -1,16 +1,34 @@
 # End-to-End Encryption (E2EE) Support
 
-## Current Status
+## Current Status: Partial Implementation
 
-The bot does **not** currently support end-to-end encrypted rooms. When invited to an encrypted room (which is the default for Matrix direct messages), the bot will:
+E2EE support has been partially implemented but **does not reliably work** due to a fundamental Matrix protocol issue: clients like Element do not always share Megolm session keys with new/unverified devices.
 
-- Join the room successfully
-- Receive encrypted messages (as `MegolmEvent`)
-- Be unable to decrypt or respond to them
+### What's Implemented
 
-## Workaround: Create Unencrypted Rooms
+- Crypto store creation and persistence (`./nio_store/`)
+- Device key generation and upload
+- Automatic key query/claim after sync
+- `ignore_unverified_devices=True` for sending messages
+- Graceful degradation (error message when decryption fails)
+- `matrix-invites` CLI tool for managing encrypted room invitations
 
-To chat privately with the bot without encryption:
+### What Doesn't Work
+
+**Decryption of incoming messages fails** because:
+
+1. When a user sends an encrypted message, their client (e.g., Element) creates a Megolm session
+2. Element shares the Megolm session keys only with devices it knows about at that moment
+3. Even though the bot's device keys are uploaded, Element often doesn't include the bot's device in the key sharing
+4. The bot receives `MegolmEvent` but cannot decrypt it ("no session found")
+
+This is a known Matrix ecosystem issue related to device list synchronization and key sharing timing.
+
+## Workarounds
+
+### Option 1: Use Unencrypted Rooms (Recommended)
+
+To chat privately with the bot without encryption issues:
 
 1. **Create a new room** (not "Start Direct Message")
    - In Element: Click "+" > "New Room"
@@ -22,206 +40,98 @@ To chat privately with the bot without encryption:
 
 3. **Invite the bot** to the room
 
-4. **Start chatting** - the bot will now respond normally
+4. **Start chatting** - the bot will respond normally
 
-## Why E2EE is Complex for Bots
+### Option 2: Use the Invite Manager (Experimental)
 
-Matrix E2EE uses the Olm/Megolm cryptographic protocols, which require:
+The `matrix-invites` tool can create encrypted DMs where the bot initiates:
 
-| Requirement | Description |
-|-------------|-------------|
-| **libolm library** | Native C library for cryptographic operations |
-| **Device keys** | Each bot instance needs persistent identity keys |
-| **Session storage** | SQLite database for Megolm session keys |
-| **Device verification** | Trust establishment with other devices |
-| **Key persistence** | Loss of keys = loss of message history |
-
-## Implementation Plan
-
-### Dependencies Required
-
-**System packages:**
 ```bash
-# Ubuntu/Debian
+uv run matrix-invites
+> dm @username:matrix.org
+```
+
+This creates an encrypted room and sends an initial greeting, attempting to establish the Megolm session first. However, subsequent messages from the user may still fail to decrypt due to Element creating new sessions.
+
+### Option 3: /discardsession (Unreliable)
+
+After the bot joins an encrypted room, the user can try:
+
+1. Type `/discardsession` in the chat
+2. Send a new message
+
+This forces Element to create a new Megolm session, but it may still not include the bot's device.
+
+## Technical Details
+
+### Why E2EE is Complex for Bots
+
+Matrix E2EE uses Olm/Megolm protocols:
+
+| Component | Description |
+|-----------|-------------|
+| **Olm** | 1:1 encrypted channel between devices for key exchange |
+| **Megolm** | Group encryption for room messages |
+| **Device keys** | Each device has identity keys uploaded to homeserver |
+| **Session keys** | Megolm session keys shared via Olm to authorized devices |
+
+The problem: **Key sharing is sender-initiated**. When Alice sends a message, her client decides which devices get the Megolm session keys. If Alice's client doesn't have the bot's device in its device list (or doesn't trust it), the bot never gets the keys.
+
+### Implementation Details
+
+**Dependencies:**
+```bash
+# System
 apt-get install libolm-dev
 
-# macOS
-brew install libolm
-
-# Alpine (Docker)
-apk add olm-dev
+# Python
+pip install "matrix-nio[e2e]"
 ```
 
-**Python (pyproject.toml change):**
-```diff
--    "matrix-nio>=0.24.0",
-+    "matrix-nio[e2e]>=0.24.0",
-```
+**Key files:**
+- `matrix_llmagent/matrix_client.py` - E2EE client configuration, `load_store()`, key upload
+- `matrix_llmagent/matrix_monitor.py` - `MegolmEvent` handling
+- `matrix_llmagent/invite_manager.py` - CLI for room management
+- `./nio_store/` - SQLite crypto store (device keys, sessions)
 
-### Code Changes Required
-
-#### 1. Client Configuration (matrix_client.py)
-
-```python
-from nio import AsyncClient, AsyncClientConfig
-
-# E2EE configuration
-client_config = AsyncClientConfig(
-    encryption_enabled=True,
-    store_sync_tokens=True,
-)
-
-# Client needs store_path for key persistence
-client = AsyncClient(
-    homeserver=self.homeserver,
-    user=self.user_id,
-    device_id=self.device_id,
-    store_path="./nio_store/",  # New: encryption key storage
-    config=client_config,
-)
-```
-
-#### 2. Credential Persistence
-
-To maintain device identity across restarts, credentials must be saved:
-
-```python
-# After login, save credentials
-credentials = {
-    "homeserver": homeserver,
-    "user_id": response.user_id,
-    "device_id": response.device_id,
-    "access_token": response.access_token,
-}
-# Save to secure storage (e.g., encrypted JSON file)
-
-# On restart, restore instead of fresh login
-client.restore_login(
-    user_id=creds["user_id"],
-    device_id=creds["device_id"],
-    access_token=creds["access_token"],
-)
-client.load_store()  # Load encryption keys
-```
-
-#### 3. Key Upload
-
-After login/restore, upload device keys to homeserver:
-
-```python
-if client.should_upload_keys:
-    await client.keys_upload()
-```
-
-#### 4. Device Trust Strategy
-
-**Option A: Auto-trust all devices (simple, less secure)**
-```python
-# Trust all devices for a user
-for device_id, device in client.device_store[user_id].items():
-    if not client.olm.is_device_verified(device):
-        client.verify_device(device)
-```
-
-**Option B: Interactive emoji verification (complex, secure)**
-- Requires handling `KeyVerificationStart`, `KeyVerificationKey`, `KeyVerificationMac` events
-- User must compare emoji on both devices
-- More appropriate for human-to-human verification
-
-**Recommendation for bots:** Option A with clear documentation that auto-trust is enabled.
-
-#### 5. Graceful Degradation
-
-Handle messages that cannot be decrypted:
-
-```python
-from nio import MegolmEvent
-
-async def on_room_message(room, event):
-    if isinstance(event, MegolmEvent):
-        # Could not decrypt
-        logger.warning(f"Could not decrypt message in {room.room_id}")
-        await client.send_message(
-            room.room_id,
-            "I received an encrypted message but couldn't decrypt it. "
-            "This may happen with messages sent before I joined."
-        )
-        return
-    # Normal message handling...
-```
-
-### Configuration Options
-
-New config section for E2EE:
-
+**Config options:**
 ```json
 {
   "matrix": {
     "encryption": {
       "enabled": true,
-      "store_path": "./nio_store/",
-      "auto_trust_devices": true,
-      "credentials_file": "./matrix_credentials.json"
+      "store_path": "./nio_store/"
     }
   }
 }
 ```
 
-### Storage Requirements
+### Known Limitations
 
-| File/Directory | Purpose | Size |
-|----------------|---------|------|
-| `./nio_store/` | Encryption keys, sessions | ~100-500KB |
-| `matrix_credentials.json` | Device ID, access token | ~1KB |
+1. **No cross-signing support** - matrix-nio cannot verify via master signing key
+2. **No SSSS** - No server-side key backup integration
+3. **No key request handling** - Cannot request keys for missed messages
+4. **Device list sync issues** - Other clients may not see bot's device
+5. **Session key sharing** - Depends entirely on sender's client behavior
 
-**Important:** The `nio_store/` directory contains cryptographic keys. If lost:
-- Bot gets a new device identity
-- Old encrypted messages become unreadable
-- Users may need to re-verify the bot
+## Future Options
 
-### Docker Considerations
+### Pantalaimon
 
-For containerized deployments:
+[Pantalaimon](https://github.com/matrix-org/pantalaimon) is an E2EE-aware proxy that sits between a client and homeserver. It handles all encryption/decryption, presenting unencrypted messages to the client. This could be a more reliable solution but adds deployment complexity.
 
-```dockerfile
-# Add libolm
-RUN apt-get update && apt-get install -y libolm-dev
+### Dehydrated Devices
 
-# Mount persistent volume for encryption keys
-VOLUME ["/app/nio_store"]
-```
+A future Matrix feature that would allow "drying" a device so it can receive keys while offline. Not yet widely implemented.
 
-```yaml
-# docker-compose.yml
-volumes:
-  - ./nio_store:/app/nio_store
-  - ./matrix_credentials.json:/app/matrix_credentials.json
-```
+### Wait for Matrix Improvements
 
-### Limitations
-
-matrix-nio E2EE does not support:
-
-- **Cross-signing** - Cannot verify via master signing key
-- **Server-side key backup** - No SSSS (Secure Secret Storage and Sharing)
-- **Key sharing requests** - Cannot request keys for old messages
-
-### Effort Estimate
-
-| Task | Time |
-|------|------|
-| Dependencies + basic setup | 1-2 hours |
-| Credential persistence | 1-2 hours |
-| Auto-trust implementation | 1 hour |
-| Testing with encrypted room | 1-2 hours |
-| Docker updates | 30 min |
-| Documentation | 30 min |
-| **Total (minimal E2EE)** | **4-8 hours** |
-
-Add 4-8 hours more for interactive verification support.
+The Matrix protocol is actively being improved. Future versions may have better key sharing mechanisms.
 
 ## References
 
-- [matrix-nio E2EE documentation](https://matrix-nio.readthedocs.io/en/latest/examples.html#e2e-encryption)
-- [matrix-nio examples](https://github.com/matrix-nio/matrix-nio/tree/main/examples)
-- [Olm/Megolm specification](https://matrix.org/docs/matrix-concepts/end-to-end-encryption/)
+- [Fix Decryption Error Guide](https://joinmatrix.org/guide/fix-decryption-error/)
+- [Unable to Decrypt Explained](https://blog.neko.dev/posts/unable-to-decrypt-matrix.html)
+- [matrix-nio E2EE documentation](https://matrix-nio.readthedocs.io/en/latest/examples.html)
+- [Pantalaimon](https://github.com/matrix-org/pantalaimon)
+- [Matrix E2EE Spec](https://matrix.org/docs/matrix-concepts/end-to-end-encryption/)
