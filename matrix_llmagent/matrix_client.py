@@ -57,7 +57,10 @@ class MatrixClient:
 
         # For E2EE: load the crypto store (creates it if it doesn't exist)
         # Note: client.user_id must be set for load_store to work
-        if encryption_enabled and self.user_id and self.client.user_id:
+        # AsyncClient sets client.user from constructor, but client.user_id is empty until login
+        # We need to set it explicitly for load_store to work
+        if encryption_enabled and self.user_id:
+            self.client.user_id = self.user_id
             self.client.load_store()
             logger.info(f"Loaded crypto store from {store_path}")
 
