@@ -607,7 +607,7 @@ class MatrixMonitor:
 
         if lib_config.get("enabled") and lib_config.get("base_url"):
             lib_name = lib_config.get("name", "Library")
-            tool_lines.append(f"  - {lib_name} (figures, tables, equations)")
+            tool_lines.append(f"  - {lib_name} (publications, figures, tables, equations)")
 
         if tools_config.get("code_execution", {}).get("enabled"):
             tool_lines.append("  - Code execution (Python sandbox)")
