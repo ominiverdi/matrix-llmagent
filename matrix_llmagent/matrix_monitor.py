@@ -557,7 +557,7 @@ class MatrixMonitor:
             mode_cfg = modes.get(mode_key, {})
             if mode_cfg:
                 slot_label = mode_cfg.get("slot_label", mode_cfg.get("model", "unknown"))
-                model_slots_text += f"\n- `!{slot_num} <message>` - {slot_label}"
+                model_slots_text += f"\n  !{slot_num} <message> - {slot_label}"
 
         if not model_slots_text:
             model_slots_text = "\n- No model slots configured"
