@@ -83,7 +83,7 @@ async def interactive_loop(client: AsyncClient) -> None:
     """Run interactive command loop."""
     print("\nMatrix Invite Manager")
     print("=" * 40)
-    print("Commands: list, accept <n>, reject <n>, quit")
+    print("Commands: list, accept <n>, reject <n>, dm <user_id>, quit")
     print()
 
     while True:
@@ -161,8 +161,36 @@ async def interactive_loop(client: AsyncClient) -> None:
             if room_id:
                 await reject_invite(client, room_id)
 
+        elif action in ("dm", "invite", "create"):
+            if len(parts) < 2:
+                print("Usage: dm <user_id>  (e.g., dm @user:matrix.org)")
+                continue
+
+            user_id = parts[1]
+            if not user_id.startswith("@"):
+                print("User ID must start with @ (e.g., @user:matrix.org)")
+                continue
+
+            print(f"Creating encrypted DM with {user_id}...")
+            # Create a direct room with encryption enabled
+            response = await client.room_create(
+                is_direct=True,
+                invite=[user_id],
+                initial_state=[
+                    {
+                        "type": "m.room.encryption",
+                        "content": {"algorithm": "m.megolm.v1.aes-sha2"},
+                    }
+                ],
+            )
+            if hasattr(response, "room_id"):
+                print(f"Created encrypted DM: {response.room_id}")
+                print("You can now message the bot in this room.")
+            else:
+                print(f"Failed to create DM: {response}")
+
         else:
-            print("Unknown command. Use: list, accept <n>, reject <n>, quit")
+            print("Commands: list, accept <n>, reject <n>, dm <user_id>, quit")
 
 
 async def main(config_path: str) -> None:
