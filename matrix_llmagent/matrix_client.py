@@ -55,6 +55,12 @@ class MatrixClient:
         )
         self.client.access_token = self.access_token
 
+        # For E2EE: load the crypto store (creates it if it doesn't exist)
+        # Note: client.user_id must be set for load_store to work
+        if encryption_enabled and self.user_id and self.client.user_id:
+            self.client.load_store()
+            logger.info(f"Loaded crypto store from {store_path}")
+
         self._encryption_enabled = encryption_enabled
         logger.info(
             f"Matrix client initialized for {self.user_id} on {self.homeserver} "
