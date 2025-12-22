@@ -117,6 +117,7 @@ class MatrixClient:
             room_id=room_id,
             message_type="m.room.message",
             content=content,
+            ignore_unverified_devices=True,  # Allow sending to unverified devices
         )
         if hasattr(response, "event_id"):
             logger.debug(f"Message sent to {room_id}: {response.event_id}")
@@ -144,6 +145,7 @@ class MatrixClient:
             room_id=room_id,
             message_type="m.room.message",
             content=content,
+            ignore_unverified_devices=True,  # Allow sending to unverified devices
         )
         if hasattr(response, "event_id"):
             logger.debug(f"HTML message sent to {room_id}: {response.event_id}")
@@ -240,6 +242,7 @@ class MatrixClient:
             room_id=room_id,
             message_type="m.room.message",
             content=content,
+            ignore_unverified_devices=True,  # Allow sending to unverified devices
         )
 
         if hasattr(response, "event_id"):
