@@ -37,6 +37,7 @@ dev = [
 
 [project.scripts]
 matrix-llmagent = "matrix_llmagent.main:main"
+matrix-invites = "matrix_llmagent.invite_manager:run"
 
 [tool.ruff]
 line-length = 100
