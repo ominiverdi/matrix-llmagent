@@ -254,6 +254,11 @@ async def main(config_path: str) -> None:
     )
     client.access_token = access_token
 
+    # Load the crypto store (must set user_id first for load_store to work)
+    if encryption_enabled and user_id:
+        client.user_id = user_id
+        client.load_store()
+
     try:
         # Initial sync
         print(f"Connecting as {user_id}...")
