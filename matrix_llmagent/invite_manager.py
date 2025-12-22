@@ -187,6 +187,10 @@ async def interactive_loop(client: AsyncClient) -> None:
                 room_id = response.room_id
                 print(f"Created encrypted DM: {room_id}")
 
+                # Sync to get the new room in our room list
+                print("Syncing...")
+                await client.sync(timeout=5000)
+
                 # Query keys for the invited user to ensure we have their device keys
                 print(f"Querying device keys for {user_id}...")
                 await client.keys_query()
