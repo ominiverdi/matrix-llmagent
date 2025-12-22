@@ -265,6 +265,11 @@ class MatrixClient:
         if not self._encryption_enabled:
             return
 
+        # Check if olm is loaded
+        if self.client.olm is None:
+            logger.debug("Olm not loaded, skipping device trust")
+            return
+
         if user_id not in self.client.device_store.users:
             logger.debug(f"No devices found for {user_id}")
             return
