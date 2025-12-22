@@ -26,6 +26,9 @@ from nio import AsyncClient, AsyncClientConfig, JoinError, RoomLeaveError
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
+# Suppress noisy nio logging
+logging.getLogger("nio").setLevel(logging.WARNING)
+
 
 async def get_pending_invites(client: AsyncClient) -> list[dict]:
     """Get list of pending room invitations."""
@@ -34,13 +37,8 @@ async def get_pending_invites(client: AsyncClient) -> list[dict]:
         invite_info = {
             "room_id": room_id,
             "name": room.display_name or room_id,
-            "inviter": None,
+            "inviter": "unknown",
         }
-        # Try to find who invited us
-        for event in room.invite_state:
-            if hasattr(event, "sender"):
-                invite_info["inviter"] = event.sender
-                break
         invites.append(invite_info)
     return invites
 
