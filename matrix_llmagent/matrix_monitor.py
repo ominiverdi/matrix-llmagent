@@ -4,7 +4,7 @@ import html
 import logging
 import re
 
-from nio import MatrixRoom, RoomMessageText
+from nio import MatrixRoom, MegolmEvent, RoomMessageText
 
 from .agentic_actor.library_tool import (
     LibraryResultsCache,
@@ -238,6 +238,7 @@ class MatrixMonitor:
 
         # Set up event callbacks AFTER initial sync
         self.client.add_event_callback(self.on_room_message, RoomMessageText)
+        self.client.add_event_callback(self.on_megolm_event, MegolmEvent)
 
         logger.info("Matrix monitor starting sync loop")
 
@@ -295,6 +296,40 @@ class MatrixMonitor:
         elif self.proactive:
             # Check for proactive interjecting
             await self.handle_proactive(room_id, sender, message)
+
+    async def on_megolm_event(self, room: MatrixRoom, event: MegolmEvent) -> None:
+        """Handle encrypted messages that could not be decrypted.
+
+        This is called when we receive a MegolmEvent that matrix-nio
+        could not decrypt (missing session keys, etc.).
+
+        Args:
+            room: Matrix room where message was sent
+            event: Megolm encrypted event
+        """
+        # Ignore our own messages
+        if event.sender == self.bot_user_id:
+            return
+
+        logger.warning(
+            f"Could not decrypt message in {room.room_id} from {event.sender}: "
+            f"session_id={event.session_id}"
+        )
+
+        # Only notify once per room to avoid spam
+        # We track this in a simple set on the instance
+        if not hasattr(self, "_notified_decrypt_failures"):
+            self._notified_decrypt_failures: set[str] = set()
+
+        if room.room_id not in self._notified_decrypt_failures:
+            self._notified_decrypt_failures.add(room.room_id)
+            await self.client.send_message(
+                room.room_id,
+                "I received an encrypted message but couldn't decrypt it. "
+                "This may happen with messages sent before I joined the room, "
+                "or if encryption keys weren't shared with me. "
+                "New messages should work fine.",
+            )
 
     def is_addressed_to_bot(self, message: str, sender: str, room_id: str) -> bool:
         """Check if message is addressed to the bot.

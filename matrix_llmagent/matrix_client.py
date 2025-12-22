@@ -2,9 +2,10 @@
 
 import io
 import logging
+import os
 from typing import Any
 
-from nio import AsyncClient
+from nio import AsyncClient, AsyncClientConfig
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +30,36 @@ class MatrixClient:
         if not self.user_id or not self.access_token:
             raise ValueError("Matrix user_id and access_token are required in config")
 
-        # Initialize AsyncClient
-        self.client = AsyncClient(self.homeserver, self.user_id, device_id=self.device_id)
+        # E2EE configuration
+        encryption_config = matrix_config.get("encryption", {})
+        encryption_enabled = encryption_config.get("enabled", True)
+        store_path = encryption_config.get("store_path", "./nio_store/")
+
+        # Create store directory if encryption is enabled
+        if encryption_enabled and store_path:
+            os.makedirs(store_path, exist_ok=True)
+
+        # Configure client for E2EE
+        client_config = AsyncClientConfig(
+            encryption_enabled=encryption_enabled,
+            store_sync_tokens=True,
+        )
+
+        # Initialize AsyncClient with encryption support
+        self.client = AsyncClient(
+            self.homeserver,
+            self.user_id,
+            device_id=self.device_id,
+            store_path=store_path if encryption_enabled else None,
+            config=client_config,
+        )
         self.client.access_token = self.access_token
 
-        logger.info(f"Matrix client initialized for {self.user_id} on {self.homeserver}")
+        self._encryption_enabled = encryption_enabled
+        logger.info(
+            f"Matrix client initialized for {self.user_id} on {self.homeserver} "
+            f"(E2EE: {'enabled' if encryption_enabled else 'disabled'})"
+        )
 
     async def connect(self) -> None:
         """Connect to Matrix homeserver and verify credentials."""
@@ -44,6 +70,11 @@ class MatrixClient:
         else:
             logger.error(f"Failed to connect to Matrix: {response}")
             raise ConnectionError(f"Matrix connection failed: {response}")
+
+        # Upload encryption keys if E2EE is enabled
+        if self._encryption_enabled and self.client.should_upload_keys:
+            logger.info("Uploading encryption keys...")
+            await self.client.keys_upload()
 
     async def sync(self, timeout: int = 30000) -> None:
         """Sync with Matrix server to receive events.
