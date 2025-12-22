@@ -97,6 +97,13 @@ class MatrixClient:
             timeout: Sync timeout in milliseconds (default 30s)
         """
         response = await self.client.sync(timeout=timeout)
+
+        # For E2EE: query and claim keys as needed
+        if self._encryption_enabled:
+            if self.client.should_query_keys:
+                await self.client.keys_query()
+            if self.client.should_claim_keys:
+                await self.client.keys_claim(self.client.get_users_for_key_claiming())
         if hasattr(response, "rooms"):
             logger.debug(f"Sync completed, received {len(response.rooms.join)} room updates")
         return response
