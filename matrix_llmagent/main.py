@@ -173,15 +173,19 @@ class MatrixLLMAgent:
             kb_name = kb_config.get("name", "Knowledge Base")
             kb_description = kb_config.get("description", "")
             system_prompt = system_prompt + (
-                f"\n\nIMPORTANT: You have access to a local knowledge base ({kb_name}) with two tools:\n"
+                f"\n\nYou have access to a local knowledge base ({kb_name}) with these tools:\n"
                 f"1. knowledge_base: Full-text search for pages, entities, and general information\n"
                 f"2. relationship_search: Query structured relationships (leadership, projects, chapters, events)\n\n"
-                f"ALWAYS try the local knowledge base tools FIRST before using web_search. "
                 f"{kb_description}\n\n"
+                "TOOL SELECTION RULES:\n"
+                "- If user explicitly asks to 'search the web/internet', use web_search\n"
+                "- If user asks about 'the wiki' or mentions the knowledge base by name, use knowledge_base\n"
+                "- For general questions about OSGeo projects/people/events, prefer knowledge_base first\n"
+                "- For current news, recent releases, or real-time information, use web_search\n\n"
                 "For questions about 'who is X', 'what are the projects/chapters/events', use relationship_search "
                 "with the appropriate predicate. For general information queries, use knowledge_base.\n\n"
                 "When searching, use the EXACT terms from the user's question - do not assume typos or 'correct' "
-                "unfamiliar terms. Only use web_search if the local knowledge base doesn't have the information."
+                "unfamiliar terms."
             )
 
         # Append library search guidance if enabled

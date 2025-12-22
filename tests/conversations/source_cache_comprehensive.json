@@ -1,5 +1,5 @@
 {
-  "_comment": "Comprehensive test for source caching across web, KB, and library - tests both explicit and ambiguous queries",
+  "_comment": "Comprehensive test for source caching across web, KB, and library - tests explicit, ambiguous, and news queries",
   "description": "Test source caching with human-like queries (explicit and ambiguous)",
   "timeout_seconds": 300,
   "mode": "agent",
@@ -12,7 +12,7 @@
     },
 
     {
-      "_comment": "=== AMBIGUOUS QUERY 1: Should trigger KB (mentions wiki-like content) ===",
+      "_comment": "=== AMBIGUOUS QUERY 1: general question, model chooses tool ===",
       "input": "tell me about QGIS",
       "expect_not_contains": ["failed", "error"],
       "expect_contains": []
@@ -25,7 +25,7 @@
     },
 
     {
-      "_comment": "=== EXPLICIT KB QUERY ===",
+      "_comment": "=== EXPLICIT KB QUERY (mentions wiki) ===",
       "input": "what does the OSGeo wiki say about GeoServer?",
       "expect_not_contains": ["failed", "Search failed"],
       "expect_contains": []
@@ -33,7 +33,7 @@
     {
       "_comment": "Verify KB sources are cached",
       "input": "!sources",
-      "expect_contains": ["Sources from last search", "Wiki"],
+      "expect_contains": ["Sources from last search"],
       "expect_not_contains": ["No sources"]
     },
     {
@@ -44,20 +44,20 @@
     },
 
     {
-      "_comment": "=== AMBIGUOUS QUERY 2: news/recent suggests web search ===",
+      "_comment": "=== AMBIGUOUS NEWS QUERY: could be KB (OSGeo News) or web - model decides ===",
       "input": "what's the latest news about PostGIS?",
       "expect_not_contains": ["failed"],
       "expect_contains": []
     },
     {
-      "_comment": "Check sources - might be web or KB depending on model choice",
+      "_comment": "Sources exist - could be KB (OSGeo News) or web search",
       "input": "!sources",
       "expect_contains": [],
       "expect_not_contains": ["No sources"]
     },
 
     {
-      "_comment": "=== EXPLICIT WEB SEARCH ===",
+      "_comment": "=== EXPLICIT WEB SEARCH (says 'search the web') ===",
       "input": "search the web for GDAL 3.9 release notes",
       "expect_not_contains": ["failed", "Search failed"],
       "expect_contains": []
@@ -95,46 +95,59 @@
       "expect_contains": []
     },
     {
-      "_comment": "Verify library sources are cached (if library is configured)",
+      "_comment": "Verify library sources are cached",
       "input": "!sources",
       "expect_contains": ["Sources"],
       "expect_not_contains": ["No sources"]
     },
 
     {
-      "_comment": "=== AMBIGUOUS QUERY 3: could be KB or web ===",
+      "_comment": "=== AMBIGUOUS QUERY: 'president' - KB has relationship data ===",
       "input": "who is the president of OSGeo?",
       "expect_not_contains": ["failed"],
       "expect_contains": []
     },
     {
-      "_comment": "Check sources",
+      "_comment": "Check sources - likely KB (relationship_search) but could be web",
       "input": "!sources",
       "expect_contains": [],
       "expect_not_contains": ["No sources"]
     },
 
     {
-      "_comment": "=== BACK TO EXPLICIT KB ===",
+      "_comment": "=== EXPLICIT KB QUERY (mentions wiki) ===",
       "input": "according to the wiki, what is MapServer?",
       "expect_not_contains": ["failed", "Search failed"],
       "expect_contains": []
     },
     {
-      "_comment": "Sources may show KB (if tool was used) or previous search (if model answered from knowledge)",
+      "_comment": "Sources may show KB or previous (model may answer from knowledge)",
       "input": "!sources",
       "expect_contains": ["Sources"],
       "expect_not_contains": ["No sources"]
     },
 
     {
-      "_comment": "=== FINAL: EXPLICIT WEB AGAIN ===",
-      "input": "use the web_search tool to find information about FOSS4G 2025 location",
+      "_comment": "=== EXPLICIT WEB SEARCH (says 'search the internet') ===",
+      "input": "search the internet for FOSS4G 2025 location",
       "expect_not_contains": ["failed", "Search failed"],
       "expect_contains": []
     },
     {
-      "_comment": "Sources should exist (web if tool was used, or previous search)",
+      "_comment": "Sources exist (web if tool used, or previous - model may answer from knowledge)",
+      "input": "!sources",
+      "expect_contains": ["Sources"],
+      "expect_not_contains": ["No sources"]
+    },
+
+    {
+      "_comment": "=== AMBIGUOUS NEWS QUERY 2: OSGeo news could be in KB ===",
+      "input": "any recent OSGeo announcements?",
+      "expect_not_contains": ["failed"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Sources exist - could be KB (OSGeo News/wiki) or web",
       "input": "!sources",
       "expect_contains": ["Sources"],
       "expect_not_contains": ["No sources"]
