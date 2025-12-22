@@ -543,83 +543,99 @@ class MatrixMonitor:
         return self.command_config.get("default_mode", "serious"), verbose
 
     async def _send_help(self, room_id: str) -> None:
-        """Send help message with available commands."""
-        # Check which tools are available
+        """Send help message based on what's actually configured."""
         tools_config = self.agent.config.get("tools", {})
-        kb_config = tools_config.get("knowledge_base", {})
-        kb_name = kb_config.get("name", "Knowledge Base") if kb_config.get("enabled") else None
-
-        # Build model slots section dynamically from config
         modes = self.command_config.get("modes", {})
-        model_slots_text = ""
+        providers_config = self.agent.config.get("providers", {})
+
+        # Build modes section dynamically
+        mode_lines = []
+
+        # Serious mode
+        if modes.get("serious"):
+            default_cfg = modes["serious"]
+            default_model = default_cfg.get("model", "unknown")
+            if isinstance(default_model, list):
+                default_model = default_model[0] if default_model else "unknown"
+            if ":" in str(default_model):
+                default_model = default_model.split(":")[-1]
+            mode_lines.append(f"  !s <message> - Serious mode (default: {default_model})")
+
+        # Sarcastic mode
+        if modes.get("sarcastic"):
+            mode_lines.append("  !d <message> - Sarcastic mode - witty, humorous responses")
+
+        # Agent mode
+        if modes.get("serious"):
+            mode_lines.append("  !a <message> - Agent mode - multi-turn research with tools")
+
+        # Perplexity mode (only if configured)
+        if providers_config.get("perplexity", {}).get("key"):
+            mode_lines.append("  !p <message> - Perplexity mode - web-enhanced AI responses")
+
+        # Library search
+        lib_config = tools_config.get("library", {})
+        if lib_config.get("enabled") and lib_config.get("base_url"):
+            lib_name = lib_config.get("name", "Library")
+            mode_lines.append(f"  !l <query> - {lib_name} search - direct search without LLM")
+
+        # Unsafe mode
+        if modes.get("unsafe"):
+            mode_lines.append("  !u <message> - Unsafe mode - uncensored responses")
+
+        mode_lines.append("  !v <message> - Verbose mode - detailed responses")
+        mode_lines.append("  !h - Show this help message")
+
+        # Build numbered model slots
+        slot_lines = []
         for slot_num in ["2", "3", "4", "5", "6", "7"]:
             mode_key = f"serious{slot_num}"
             mode_cfg = modes.get(mode_key, {})
-            if mode_cfg:
+            if mode_cfg and mode_cfg.get("model"):
                 slot_label = mode_cfg.get("slot_label", mode_cfg.get("model", "unknown"))
-                model_slots_text += f"\n  !{slot_num} <message> - {slot_label}"
+                slot_lines.append(f"  !{slot_num} <message> - {slot_label}")
 
-        if not model_slots_text:
-            model_slots_text = "\n- No model slots configured"
+        # Build tools section
+        tool_lines = []
+        web_config = tools_config.get("web_search", {})
+        if web_config.get("provider"):
+            tool_lines.append("  - Web search and webpage visiting")
 
-        # Get default model info
-        default_mode = self.command_config.get("default_mode", "serious")
-        default_cfg = modes.get(default_mode, {})
-        default_model = default_cfg.get("model", "unknown")
-        if isinstance(default_model, list):
-            default_model = default_model[0] if default_model else "unknown"
-        # Extract just the model name part after the provider prefix
-        if ":" in str(default_model):
-            default_model = default_model.split(":")[-1]
+        kb_config = tools_config.get("knowledge_base", {})
+        if kb_config.get("enabled"):
+            tool_lines.append("  - OSGeo Knowledge (wiki, news, relationships)")
 
-        help_text = f"""Available Commands
+        if lib_config.get("enabled") and lib_config.get("base_url"):
+            lib_name = lib_config.get("name", "Library")
+            tool_lines.append(f"  - {lib_name} (figures, tables, equations)")
 
-Modes:
-  !s <message> - Serious mode (default: {default_model})
-  !d <message> - Sarcastic mode - witty, humorous responses
-  !a <message> - Agent mode - multi-turn research with tool chaining
-  !p <message> - Perplexity mode - web-enhanced AI responses
-  !l <query> - Library search - direct search without LLM
-  !u <message> - Unsafe mode - uncensored responses
-  !v <message> - Verbose mode - get detailed responses instead of concise ones
-  !h - Show this help message
+        if tools_config.get("code_execution", {}).get("enabled"):
+            tool_lines.append("  - Code execution (Python sandbox)")
 
-Page Navigation (after viewing a document page):
-  !next - Next page
-  !prev - Previous page
-  !page N - Jump to page N
+        if tools_config.get("image_generation", {}).get("enabled"):
+            tool_lines.append("  - Image generation")
 
-Source Viewing (golden cord - view source pages):
-  !sources - List sources from last search
-  !source N - View source page N
+        # Build help text
+        help_text = "Available Commands\n\nModes:\n" + "\n".join(mode_lines)
 
-Model Comparison Slots:{model_slots_text}
-
-Tools Available:
-  - Web search and webpage visiting
-  - Code execution (if configured)
-  - Image generation (if configured)"""
-
-        if kb_name:
-            help_text += f"\n  - {kb_name} search"
+        if slot_lines:
+            help_text += "\n\nAlternate Models:\n" + "\n".join(slot_lines)
 
         help_text += """
 
-Examples:
-  llm-assistant: what is Python?
-  llm-assistant: !v explain machine learning
-  llm-assistant: !d tell me a programming joke
-  llm-assistant: !a research recent AI developments
-  llm-assistant: !l mercator projection
+Source Viewing:
+  !sources - List sources from last search
+  !source N - View source page N"""
 
-Tips:
-  - Responses are concise by default (1 sentence) - say "tell me more" for details
-  - Use !v prefix when you need a comprehensive answer upfront
-  - Use !a for complex research that needs multiple steps
-  - Use !d when you want fun, sarcastic responses
-  - Use !l for quick library search, then show N to view images
-  - Ask "show me page N of <document>" to browse document pages
-  - Use !next/!prev/!page N for quick page navigation"""
+        if tool_lines:
+            help_text += "\n\nTools Available:\n" + "\n".join(tool_lines)
+
+        help_text += "\n\nTips:\n  - Responses are concise by default - say 'tell me more' for details\n  - Use !v prefix for comprehensive answers"
+
+        if lib_config.get("enabled"):
+            help_text += "\n  - Use !l for quick library search, then 'show N' to view images"
+
+        help_text += "\n  - Use !next/!prev/!page N to navigate document pages"
 
         await self.client.send_message(room_id, help_text)
 

@@ -271,97 +271,115 @@ class MatrixLLMAgent:
 
 
 def _print_cli_help(config: dict[str, Any]) -> None:
-    """Print CLI help message."""
+    """Print CLI help message based on what's actually configured."""
     tools_config = config.get("tools", {})
-    kb_config = tools_config.get("knowledge_base", {})
-    kb_name = kb_config.get("name", "Knowledge Base") if kb_config.get("enabled") else None
-
-    # Get command config for mode information
     command_config = config.get("matrix", {}).get("command", {})
     modes = command_config.get("modes", {})
+    providers_config = config.get("providers", {})
 
-    # Get default model info
-    default_mode = command_config.get("default_mode", "serious")
-    default_cfg = modes.get(default_mode, {})
-    default_model = default_cfg.get("model", "unknown")
-    if isinstance(default_model, list):
-        default_model = default_model[0] if default_model else "unknown"
-    if ":" in str(default_model):
-        default_model = default_model.split(":")[-1]
+    # Build modes section dynamically based on what's configured
+    mode_lines = []
 
-    # Build model slots section dynamically
-    model_slots_lines = []
+    # Serious mode (always available if configured)
+    if modes.get("serious"):
+        default_cfg = modes["serious"]
+        default_model = default_cfg.get("model", "unknown")
+        if isinstance(default_model, list):
+            default_model = default_model[0] if default_model else "unknown"
+        if ":" in str(default_model):
+            default_model = default_model.split(":")[-1]
+        mode_lines.append(f"  !s <message>  - Serious mode (default: {default_model})")
+
+    # Sarcastic mode
+    if modes.get("sarcastic"):
+        mode_lines.append("  !d <message>  - Sarcastic mode - witty, humorous responses")
+
+    # Agent mode (serious mode with tools)
+    if modes.get("serious"):
+        mode_lines.append("  !a <message>  - Agent mode - multi-turn research with tools")
+
+    # Perplexity mode (only if perplexity provider is configured)
+    if providers_config.get("perplexity", {}).get("key"):
+        mode_lines.append("  !p <message>  - Perplexity mode - web-enhanced AI responses")
+
+    # Library search (only if library is enabled)
+    lib_config = tools_config.get("library", {})
+    if lib_config.get("enabled") and lib_config.get("base_url"):
+        lib_name = lib_config.get("name", "Library")
+        mode_lines.append(f"  !l <query>    - {lib_name} search - direct search without LLM")
+
+    # Unsafe mode
+    if modes.get("unsafe"):
+        mode_lines.append("  !u <message>  - Unsafe mode - uncensored responses")
+
+    # Verbose is always available as a modifier
+    mode_lines.append("  !v <message>  - Verbose mode - detailed responses instead of concise")
+    mode_lines.append("  !h            - Show this help message")
+
+    # Build numbered model slots section
+    slot_lines = []
     for slot_num in ["2", "3", "4", "5", "6", "7"]:
         mode_key = f"serious{slot_num}"
         mode_cfg = modes.get(mode_key, {})
-        if mode_cfg:
+        if mode_cfg and mode_cfg.get("model"):
             slot_label = mode_cfg.get("slot_label", mode_cfg.get("model", "unknown"))
-            model_slots_lines.append(f"  !{slot_num} <message>  - {slot_label}")
+            slot_lines.append(f"  !{slot_num} <message>  - {slot_label}")
 
-    if not model_slots_lines:
-        model_slots_lines.append("  No model slots configured")
+    # Build tools section dynamically
+    tool_lines = []
 
-    model_slots_text = "\n".join(model_slots_lines)
+    # Web search (check if any web search provider is configured)
+    web_config = tools_config.get("web_search", {})
+    if web_config.get("provider"):
+        tool_lines.append("  - Web search and webpage visiting")
 
-    print(f"""
-Available Commands
-==================
+    # Knowledge base
+    kb_config = tools_config.get("knowledge_base", {})
+    if kb_config.get("enabled"):
+        tool_lines.append("  - OSGeo Knowledge (wiki, news, relationships)")
 
-Modes:
-  !s <message>  - Serious mode (default: {default_model})
-  !d <message>  - Sarcastic mode - witty, humorous responses
-  !a <message>  - Agent mode - multi-turn research with tool chaining
-  !p <message>  - Perplexity mode - web-enhanced AI responses
-  !l <query>    - Library search - direct search without LLM
-  !u <message>  - Unsafe mode - uncensored responses
-  !v <message>  - Verbose mode - get detailed responses instead of concise ones
-  !h            - Show this help message
+    # Library
+    if lib_config.get("enabled") and lib_config.get("base_url"):
+        lib_name = lib_config.get("name", "Library")
+        tool_lines.append(f"  - {lib_name} (figures, tables, equations)")
 
-Page Navigation (after viewing a document page):
-  !next         - Next page
-  !prev         - Previous page
-  !page N       - Jump to page N
+    # Code execution
+    if tools_config.get("code_execution", {}).get("enabled"):
+        tool_lines.append("  - Code execution (Python sandbox)")
 
-Source Viewing (golden cord - view source pages):
-  !sources      - List sources from last search
-  !source N     - View source page N
+    # Image generation
+    if tools_config.get("image_generation", {}).get("enabled"):
+        tool_lines.append("  - Image generation")
 
-Session:
-  !clear        - Clear chat history and all caches (start fresh)
+    # Print the help
+    print("\nAvailable Commands")
+    print("==================")
 
-Model Comparison Slots:
-{model_slots_text}
+    print("\nModes:")
+    print("\n".join(mode_lines))
 
-Tools Available:
-  - Web search and webpage visiting
-  - Code execution (if configured)
-  - Image generation (if configured)""")
+    if slot_lines:
+        print("\nAlternate Models:")
+        print("\n".join(slot_lines))
 
-    if kb_name:
-        print(f"  - {kb_name} search")
+    print("\nSource Viewing:")
+    print("  !sources      - List sources from last search")
+    print("  !source N     - View source page N")
 
-    lib_config = tools_config.get("library", {})
-    lib_name = lib_config.get("name", "OSGeo Library") if lib_config.get("enabled") else None
-    if lib_name:
-        print(f"  - {lib_name} search (use `show N` to view images)")
+    print("\nSession:")
+    print("  !clear        - Clear chat history and all caches (start fresh)")
 
-    print("""
-Examples:
-  uv run matrix-llmagent --message "what is Python?"
-  uv run matrix-llmagent --message "!v explain machine learning"
-  uv run matrix-llmagent --message "!d tell me a programming joke"
-  uv run matrix-llmagent --message "!a research recent AI developments"
-  uv run matrix-llmagent --message "!l mercator projection"
+    if tool_lines:
+        print("\nTools Available:")
+        print("\n".join(tool_lines))
 
-Tips:
-  - Responses are concise by default (1 sentence) - say "tell me more" for details
-  - Use !v prefix when you need a comprehensive answer upfront
-  - Use !a for complex research that needs multiple steps
-  - Use !d when you want fun, sarcastic responses
-  - Use !l for quick library search, then `show N` to view images
-  - Ask "show me page N of <document>" to browse document pages
-  - Use !next/!prev/!page N for quick page navigation
-""")
+    print("\nTips:")
+    print("  - Responses are concise by default - say 'tell me more' for details")
+    print("  - Use !v prefix when you need a comprehensive answer upfront")
+    if lib_config.get("enabled"):
+        print("  - Use !l for quick library search, then 'show N' to view images")
+    print("  - Use !next/!prev/!page N to navigate document pages")
+    print()
 
 
 def _print_library_help(config: dict[str, Any]) -> None:
