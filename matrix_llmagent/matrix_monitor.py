@@ -636,6 +636,7 @@ Source Viewing:
             help_text += "\n  - Use !l for quick library search, then 'show N' to view images"
 
         help_text += "\n  - Use !next/!prev/!page N to navigate document pages"
+        help_text += "\n  - Use !clear to reset history and caches if responses get confused"
 
         await self.client.send_message(room_id, help_text)
 
