@@ -4,7 +4,13 @@ import html
 import logging
 import re
 
-from nio import KeyVerificationEvent, MatrixRoom, MegolmEvent, RoomMessageText
+from nio import (
+    InviteMemberEvent,
+    KeyVerificationEvent,
+    MatrixRoom,
+    MegolmEvent,
+    RoomMessageText,
+)
 
 from .agentic_actor.library_tool import (
     LibraryResultsCache,
@@ -242,6 +248,7 @@ class MatrixMonitor:
         # Set up event callbacks AFTER initial sync
         self.client.add_event_callback(self.on_room_message, RoomMessageText)
         self.client.add_event_callback(self.on_megolm_event, MegolmEvent)
+        self.client.add_event_callback(self.on_invite, InviteMemberEvent)
 
         # Set up key verification callback for E2EE
         self.client.add_to_device_callback(
@@ -342,6 +349,28 @@ class MatrixMonitor:
                 "or if encryption keys weren't shared with me. "
                 "New messages should work fine.",
             )
+
+    async def on_invite(self, room: MatrixRoom, event: InviteMemberEvent) -> None:
+        """Handle room invites - auto-accept all invites.
+
+        Args:
+            room: Matrix room we're invited to
+            event: Invite event
+        """
+        # Only handle invites for us
+        if event.state_key != self.bot_user_id:
+            return
+
+        logger.info(f"Received invite to {room.room_id} from {event.sender}")
+
+        try:
+            await self.client.join_room(room.room_id)
+            logger.info(f"Auto-joined room {room.room_id}")
+
+            # Trust the inviter's devices for E2EE
+            self.client.trust_devices_for_user(event.sender)
+        except Exception as e:
+            logger.error(f"Failed to auto-join room {room.room_id}: {e}")
 
     def is_addressed_to_bot(self, message: str, sender: str, room_id: str) -> bool:
         """Check if message is addressed to the bot.
