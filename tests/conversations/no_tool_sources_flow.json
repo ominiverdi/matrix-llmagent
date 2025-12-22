@@ -1,0 +1,62 @@
+{
+  "_comment": "Test !sources behavior when model answers from internal knowledge vs using tools",
+  "description": "Test !sources shows appropriate message based on whether tools were used",
+  "timeout_seconds": 300,
+  "mode": "agent",
+  "steps": [
+    {
+      "_comment": "Step 1: Initial state - no sources",
+      "input": "!sources",
+      "expect_contains": ["No sources"],
+      "expect_not_contains": []
+    },
+    {
+      "_comment": "Step 2: Simple question that should NOT trigger any search tool",
+      "input": "What is 2+2?",
+      "expect_contains": ["4"],
+      "expect_not_contains": ["failed"]
+    },
+    {
+      "_comment": "Step 3: Verify no sources after non-search query",
+      "input": "!sources",
+      "expect_contains": ["No sources"],
+      "expect_not_contains": []
+    },
+    {
+      "_comment": "Step 4: Query that SHOULD trigger knowledge_base tool (explicit wiki reference)",
+      "input": "What does the OSGeo wiki say about GeoServer?",
+      "expect_not_contains": ["failed", "Search failed"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Step 5: Verify sources ARE available after KB search",
+      "input": "!sources",
+      "expect_contains": ["Sources from last search"],
+      "expect_not_contains": ["No sources"]
+    },
+    {
+      "_comment": "Step 6: Another simple question (no tool needed)",
+      "input": "What is the capital of France?",
+      "expect_contains": ["Paris"],
+      "expect_not_contains": ["failed"]
+    },
+    {
+      "_comment": "Step 7: Sources should still show KB results (most recent search)",
+      "input": "!sources",
+      "expect_contains": ["Sources from last search"],
+      "expect_not_contains": ["No sources"]
+    },
+    {
+      "_comment": "Step 8: Trigger web search explicitly",
+      "input": "Use web_search to find the latest Python release date",
+      "expect_not_contains": ["failed", "Search failed"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Step 9: Verify web search sources are now shown (more recent than KB)",
+      "input": "!sources",
+      "expect_contains": ["Sources from last web search"],
+      "expect_not_contains": ["No sources"]
+    }
+  ]
+}

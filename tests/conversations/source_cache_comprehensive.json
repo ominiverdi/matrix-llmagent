@@ -1,0 +1,143 @@
+{
+  "_comment": "Comprehensive test for source caching across web, KB, and library - tests both explicit and ambiguous queries",
+  "description": "Test source caching with human-like queries (explicit and ambiguous)",
+  "timeout_seconds": 300,
+  "mode": "agent",
+  "steps": [
+    {
+      "_comment": "=== INITIAL STATE ===",
+      "input": "!sources",
+      "expect_contains": ["No sources"],
+      "expect_not_contains": []
+    },
+
+    {
+      "_comment": "=== AMBIGUOUS QUERY 1: Should trigger KB (mentions wiki-like content) ===",
+      "input": "tell me about QGIS",
+      "expect_not_contains": ["failed", "error"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Check what source was used (could be KB, web, or none)",
+      "input": "!sources",
+      "expect_contains": [],
+      "expect_not_contains": []
+    },
+
+    {
+      "_comment": "=== EXPLICIT KB QUERY ===",
+      "input": "what does the OSGeo wiki say about GeoServer?",
+      "expect_not_contains": ["failed", "Search failed"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Verify KB sources are cached",
+      "input": "!sources",
+      "expect_contains": ["Sources from last search", "Wiki"],
+      "expect_not_contains": ["No sources"]
+    },
+    {
+      "_comment": "Test source detail",
+      "input": "!source 1",
+      "expect_contains": ["GeoServer"],
+      "expect_not_contains": ["Invalid"]
+    },
+
+    {
+      "_comment": "=== AMBIGUOUS QUERY 2: news/recent suggests web search ===",
+      "input": "what's the latest news about PostGIS?",
+      "expect_not_contains": ["failed"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Check sources - might be web or KB depending on model choice",
+      "input": "!sources",
+      "expect_contains": [],
+      "expect_not_contains": ["No sources"]
+    },
+
+    {
+      "_comment": "=== EXPLICIT WEB SEARCH ===",
+      "input": "search the web for GDAL 3.9 release notes",
+      "expect_not_contains": ["failed", "Search failed"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Verify web search sources are cached",
+      "input": "!sources",
+      "expect_contains": ["Sources from last web search"],
+      "expect_not_contains": ["No sources"]
+    },
+    {
+      "_comment": "Test web source detail",
+      "input": "!source 1",
+      "expect_contains": [],
+      "expect_not_contains": ["Invalid"]
+    },
+
+    {
+      "_comment": "=== SIMPLE QUESTION (no tool needed) ===",
+      "input": "what is 5 times 7?",
+      "expect_contains": ["35"],
+      "expect_not_contains": ["failed"]
+    },
+    {
+      "_comment": "Sources should still show previous web search (most recent search)",
+      "input": "!sources",
+      "expect_contains": ["Sources from last web search", "GDAL"],
+      "expect_not_contains": ["No sources"]
+    },
+
+    {
+      "_comment": "=== EXPLICIT LIBRARY SEARCH ===",
+      "input": "search the library for remote sensing",
+      "expect_not_contains": ["failed", "not configured"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Verify library sources are cached (if library is configured)",
+      "input": "!sources",
+      "expect_contains": ["Sources"],
+      "expect_not_contains": ["No sources"]
+    },
+
+    {
+      "_comment": "=== AMBIGUOUS QUERY 3: could be KB or web ===",
+      "input": "who is the president of OSGeo?",
+      "expect_not_contains": ["failed"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Check sources",
+      "input": "!sources",
+      "expect_contains": [],
+      "expect_not_contains": ["No sources"]
+    },
+
+    {
+      "_comment": "=== BACK TO EXPLICIT KB ===",
+      "input": "according to the wiki, what is MapServer?",
+      "expect_not_contains": ["failed", "Search failed"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Sources may show KB (if tool was used) or previous search (if model answered from knowledge)",
+      "input": "!sources",
+      "expect_contains": ["Sources"],
+      "expect_not_contains": ["No sources"]
+    },
+
+    {
+      "_comment": "=== FINAL: EXPLICIT WEB AGAIN ===",
+      "input": "use the web_search tool to find information about FOSS4G 2025 location",
+      "expect_not_contains": ["failed", "Search failed"],
+      "expect_contains": []
+    },
+    {
+      "_comment": "Sources should exist (web if tool was used, or previous search)",
+      "input": "!sources",
+      "expect_contains": ["Sources"],
+      "expect_not_contains": ["No sources"]
+    }
+  ]
+}

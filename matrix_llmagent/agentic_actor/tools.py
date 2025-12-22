@@ -407,6 +407,144 @@ def format_kb_source_detail(results: KBCachedResults, index: int) -> str:
         return "\n".join(lines)
 
 
+# --- Web Search Results Cache ---
+
+
+@dataclass
+class WebSearchCachedResults:
+    """Cached web search results."""
+
+    results: list[dict]  # title, url, description
+    query: str
+    timestamp: float
+
+
+class WebSearchResultsCache:
+    """Per-room cache for web search results with TTL and LRU eviction."""
+
+    def __init__(self, ttl_hours: float = 24, max_rooms: int = 100):
+        """Initialize cache.
+
+        Args:
+            ttl_hours: Time-to-live in hours for cached results.
+            max_rooms: Maximum number of rooms to cache before LRU eviction.
+        """
+        self.ttl_seconds = ttl_hours * 3600
+        self.max_rooms = max_rooms
+        self._cache: dict[str, WebSearchCachedResults] = {}
+
+    def store(self, arc: str, results: list[dict], query: str) -> None:
+        """Store search results for an arc (room/cli context)."""
+        # Evict oldest if at capacity and this is a new arc
+        if arc not in self._cache and len(self._cache) >= self.max_rooms:
+            self._evict_oldest()
+
+        self._cache[arc] = WebSearchCachedResults(
+            results=results, query=query, timestamp=time.time()
+        )
+        logger.debug(f"Cached {len(results)} web search results for arc {arc}")
+
+    def get(self, arc: str) -> WebSearchCachedResults | None:
+        """Get cached results for an arc. Returns None if not found or expired."""
+        entry = self._cache.get(arc)
+        if entry is None:
+            return None
+
+        if self._is_expired(entry):
+            del self._cache[arc]
+            logger.debug(f"Web search cache expired for arc {arc}")
+            return None
+
+        return entry
+
+    def get_timestamp(self, arc: str) -> float:
+        """Get the timestamp of cached results for an arc. Returns 0 if not found."""
+        entry = self._cache.get(arc)
+        if entry is None or self._is_expired(entry):
+            return 0.0
+        return entry.timestamp
+
+    def clear(self, arc: str) -> None:
+        """Clear cached results for an arc."""
+        if arc in self._cache:
+            del self._cache[arc]
+
+    def _evict_oldest(self) -> None:
+        """Evict the oldest cache entry (LRU)."""
+        if not self._cache:
+            return
+
+        oldest_arc = min(self._cache.keys(), key=lambda k: self._cache[k].timestamp)
+        del self._cache[oldest_arc]
+        logger.debug(f"Evicted oldest web search cache entry for arc {oldest_arc}")
+
+    def _is_expired(self, entry: WebSearchCachedResults) -> bool:
+        """Check if a cache entry has expired."""
+        return time.time() - entry.timestamp > self.ttl_seconds
+
+
+def format_web_sources_list(results: WebSearchCachedResults) -> str:
+    """Format cached web search results as a sources list.
+
+    Args:
+        results: Cached search results from web search.
+
+    Returns:
+        Formatted string with numbered sources for !source N command.
+    """
+    if not results.results:
+        return "No sources available. Run a web search first."
+
+    lines = [f"**Sources from last web search** (query: {results.query}):", ""]
+
+    for i, result in enumerate(results.results, 1):
+        title = result.get("title", "Unknown")
+        url = result.get("url", "")
+        description = result.get("description", "").replace("\n", " ").strip()
+
+        # Short snippet for list view
+        snippet = description[:80] + "..." if len(description) > 80 else description
+
+        lines.append(f"  [{i}] {title}")
+        if snippet:
+            lines.append(f'      "{snippet}"')
+        if url:
+            lines.append(f"      {url}")
+
+    lines.append("")
+    lines.append("View full details: `!source N`")
+
+    return "\n".join(lines)
+
+
+def format_web_source_detail(results: WebSearchCachedResults, index: int) -> str:
+    """Format a single web search result with full details for !source N.
+
+    Args:
+        results: Cached search results.
+        index: 1-based index of the source to display.
+
+    Returns:
+        Formatted string with full description and URL.
+    """
+    if index < 1 or index > len(results.results):
+        return f"Invalid source number. Use 1-{len(results.results)}."
+
+    result = results.results[index - 1]
+    title = result.get("title", "Unknown")
+    url = result.get("url", "")
+    description = result.get("description", "").strip()
+
+    lines = [f"**[{index}] {title}**", ""]
+    if description:
+        lines.append(description)
+        lines.append("")
+    if url:
+        lines.append(f"**URL:** {url}")
+
+    return "\n".join(lines)
+
+
 def knowledge_base_tool_def(name: str, description: str) -> Tool:
     """Generate knowledge_base tool definition with configured name and description."""
     return {
@@ -587,10 +725,19 @@ class RateLimiter:
 class BraveSearchExecutor:
     """Async Brave Search API executor."""
 
-    def __init__(self, api_key: str, max_results: int = 5, max_calls_per_second: float = 1.0):
+    def __init__(
+        self,
+        api_key: str,
+        max_results: int = 5,
+        max_calls_per_second: float = 1.0,
+        cache: "WebSearchResultsCache | None" = None,
+        arc: str = "",
+    ):
         self.api_key = api_key
         self.max_results = max_results
         self.rate_limiter = RateLimiter(max_calls_per_second)
+        self.cache = cache
+        self.arc = arc
 
     async def execute(self, query: str) -> str:
         """Execute Brave search and return formatted results."""
@@ -619,6 +766,18 @@ class BraveSearchExecutor:
                     if not results:
                         return "No search results found. Try a different query."
 
+                    # Cache results for !sources command
+                    if self.cache and self.arc:
+                        cache_results = [
+                            {
+                                "title": r.get("title", "No title"),
+                                "url": r.get("url", ""),
+                                "description": r.get("description", ""),
+                            }
+                            for r in results
+                        ]
+                        self.cache.store(self.arc, cache_results, query)
+
                     # Format results as markdown
                     formatted_results = []
                     for result in results:
@@ -638,11 +797,18 @@ class WebSearchExecutor:
     """Async ddgs web search executor."""
 
     def __init__(
-        self, max_results: int = 10, max_calls_per_second: float = 1.0, backend: str = "auto"
+        self,
+        max_results: int = 10,
+        max_calls_per_second: float = 1.0,
+        backend: str = "auto",
+        cache: "WebSearchResultsCache | None" = None,
+        arc: str = "",
     ):
         self.max_results = max_results
         self.rate_limiter = RateLimiter(max_calls_per_second)
         self.backend = backend
+        self.cache = cache
+        self.arc = arc
 
     async def execute(self, query: str) -> str:
         """Execute web search and return formatted results."""
@@ -660,6 +826,18 @@ class WebSearchExecutor:
 
         if not results:
             return "No search results found. Try a different query."
+
+        # Cache results for !sources command
+        if self.cache and self.arc:
+            cache_results = [
+                {
+                    "title": r.get("title", "No title"),
+                    "url": r.get("href", ""),
+                    "description": r.get("body", ""),
+                }
+                for r in results
+            ]
+            self.cache.store(self.arc, cache_results, query)
 
         # Format results as markdown
         formatted_results = []
@@ -685,11 +863,15 @@ class GoogleSearchExecutor:
         cx: str,
         max_results: int = 10,
         max_calls_per_second: float = 1.0,
+        cache: "WebSearchResultsCache | None" = None,
+        arc: str = "",
     ):
         self.api_key = api_key
         self.cx = cx
         self.max_results = max_results
         self.rate_limiter = RateLimiter(max_calls_per_second)
+        self.cache = cache
+        self.arc = arc
 
     async def execute(self, query: str) -> str:
         """Execute Google search and return formatted results."""
@@ -714,6 +896,18 @@ class GoogleSearchExecutor:
 
                     if not items:
                         return "No search results found. Try a different query."
+
+                    # Cache results for !sources command
+                    if self.cache and self.arc:
+                        cache_results = [
+                            {
+                                "title": item.get("title", "No title"),
+                                "url": item.get("link", ""),
+                                "description": item.get("snippet", ""),
+                            }
+                            for item in items
+                        ]
+                        self.cache.store(self.arc, cache_results, query)
 
                     # Format results as markdown
                     formatted_results = []
@@ -744,11 +938,15 @@ class JinaSearchExecutor:
         max_calls_per_second: float = 1.0,
         api_key: str | None = None,
         user_agent: str = DEFAULT_USER_AGENT,
+        cache: "WebSearchResultsCache | None" = None,
+        arc: str = "",
     ):
         self.max_results = max_results
         self.rate_limiter = RateLimiter(max_calls_per_second)
         self.api_key = api_key
         self.user_agent = user_agent
+        self.cache = cache
+        self.arc = arc
 
     async def execute(self, query: str, **kwargs) -> str:
         """Execute Jina search and return formatted results."""
@@ -761,11 +959,10 @@ class JinaSearchExecutor:
                 f"Warning: The following parameters were ignored: {', '.join(kwargs.keys())}\n\n"
             )
 
-        url = "https://s.jina.ai/?q=" + query
+        url = "https://s.jina.ai/" + query
         headers = {
             "User-Agent": self.user_agent,
-            "X-Respond-With": "no-content",
-            "Accept": "text/plain",
+            "Accept": "application/json",
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -778,14 +975,39 @@ class JinaSearchExecutor:
                     timeout=aiohttp.ClientTimeout(total=30),
                 ) as response:
                     response.raise_for_status()
-                    content = await response.text()
+                    data = await response.json()
 
+                    results = data.get("data", [])
                     logger.info(f"Jina searching '{query}': retrieved search results")
 
-                    if not content.strip():
+                    if not results:
                         return f"{warning_prefix}No search results found. Try a different query."
 
-                    return f"{warning_prefix}## Search Results\n\n{content.strip()}"
+                    # Cache results for !sources command
+                    if self.cache and self.arc:
+                        cache_results = [
+                            {
+                                "title": r.get("title", "No title"),
+                                "url": r.get("url", ""),
+                                "description": r.get("description", ""),
+                            }
+                            for r in results[: self.max_results]
+                        ]
+                        self.cache.store(self.arc, cache_results, query)
+
+                    # Format results as markdown
+                    formatted_results = []
+                    for i, result in enumerate(results[: self.max_results], 1):
+                        title = result.get("title", "No title")
+                        result_url = result.get("url", "#")
+                        description = result.get("description", "No description")
+                        formatted_results.append(
+                            f"[{i}] Title: {title}\n"
+                            f"[{i}] URL Source: {result_url}\n"
+                            f"[{i}] Description: {description}"
+                        )
+
+                    return f"{warning_prefix}## Search Results\n\n" + "\n\n".join(formatted_results)
 
             except Exception as e:
                 logger.error(f"Jina search failed: {e}")
@@ -2057,6 +2279,7 @@ def create_tool_executors(
     router: Any = None,
     library_cache: LibraryResultsCache | None = None,
     kb_cache: KnowledgeBaseResultsCache | None = None,
+    web_search_cache: WebSearchResultsCache | None = None,
 ) -> dict[str, Any]:
     """Create tool executors with configuration."""
     # Tool configs
@@ -2080,15 +2303,24 @@ def create_tool_executors(
     search_executor = None
     if search_provider and search_provider.lower() not in ("none", "disabled", "off", "false"):
         if search_provider == "jina":
-            search_executor = JinaSearchExecutor(api_key=jina_api_key, user_agent=user_agent)
+            search_executor = JinaSearchExecutor(
+                api_key=jina_api_key,
+                user_agent=user_agent,
+                cache=web_search_cache,
+                arc=arc,
+            )
         elif search_provider == "brave":
             brave_config = tools.get("brave", {})
             brave_api_key = brave_config.get("api_key")
             if not brave_api_key:
                 logger.warning("Brave search configured but no API key found, falling back to ddgs")
-                search_executor = WebSearchExecutor(backend="brave")
+                search_executor = WebSearchExecutor(
+                    backend="brave", cache=web_search_cache, arc=arc
+                )
             else:
-                search_executor = BraveSearchExecutor(api_key=brave_api_key)
+                search_executor = BraveSearchExecutor(
+                    api_key=brave_api_key, cache=web_search_cache, arc=arc
+                )
         elif search_provider == "google":
             google_config = tools.get("google", {})
             google_api_key = google_config.get("api_key")
@@ -2097,16 +2329,20 @@ def create_tool_executors(
                 logger.warning(
                     "Google search configured but missing api_key or cx, falling back to ddgs"
                 )
-                search_executor = WebSearchExecutor(backend="auto")
+                search_executor = WebSearchExecutor(backend="auto", cache=web_search_cache, arc=arc)
             else:
-                search_executor = GoogleSearchExecutor(api_key=google_api_key, cx=google_cx)
+                search_executor = GoogleSearchExecutor(
+                    api_key=google_api_key, cx=google_cx, cache=web_search_cache, arc=arc
+                )
         else:
             if "jina" in search_provider:
                 raise ValueError(
                     f"Jina search provider must be exclusive. Found: '{search_provider}'. "
                     "Use exactly 'jina' for jina search (recommended provider, but API key required)."
                 )
-            search_executor = WebSearchExecutor(backend=search_provider)
+            search_executor = WebSearchExecutor(
+                backend=search_provider, cache=web_search_cache, arc=arc
+            )
     else:
         logger.info("Web search disabled (search_provider not configured or set to disabled)")
 

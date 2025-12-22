@@ -22,9 +22,13 @@ from .agentic_actor.library_tool import (
 from .agentic_actor.tools import (
     KBCachedResults,
     KnowledgeBaseResultsCache,
+    WebSearchCachedResults,
+    WebSearchResultsCache,
     entity_info_tool_def,
     format_kb_source_detail,
     format_kb_sources_list,
+    format_web_source_detail,
+    format_web_sources_list,
     knowledge_base_tool_def,
     relationship_search_tool_def,
 )
@@ -136,6 +140,16 @@ class MatrixLLMAgent:
                 max_rooms=cache_config.get("max_rooms", 100),
             )
             logger.info(f"Library search tool enabled: {lib_name}")
+
+        # Add web_search_cache for web search sources (always created if search is enabled)
+        tools_config = self.config.get("tools", {})
+        search_provider = tools_config.get("search_provider")
+        self.web_search_cache: WebSearchResultsCache | None = None
+        if search_provider and search_provider.lower() not in ("none", "disabled", "off", "false"):
+            self.web_search_cache = WebSearchResultsCache(
+                ttl_hours=24,
+                max_rooms=100,
+            )
 
     async def run_actor(
         self,
@@ -681,52 +695,55 @@ async def _handle_cli_source_command(
     """Handle source viewing commands in CLI mode (!sources, !source N).
 
     The 'golden cord' - lets users see sources from last search and
-    view the actual source pages. Supports both library and knowledge base sources.
+    view the actual source pages. Supports library, knowledge base, and web search sources.
 
     Args:
-        agent: MatrixLLMAgent instance with library_cache and kb_cache
+        agent: MatrixLLMAgent instance with library_cache, kb_cache, and web_search_cache
         command: 'list' or 'view'
         index: Source index for 'view', None for 'list'
         arc: Arc identifier for cache lookup
     """
-    # Get both caches
+    # Get all caches
     lib_cache = agent.library_cache
     kb_cache = agent.kb_cache
+    web_cache = agent.web_search_cache
 
     # Get results and timestamps from each cache
     lib_results = lib_cache.get(arc) if lib_cache else None
     kb_results = kb_cache.get(arc) if kb_cache else None
+    web_results = web_cache.get(arc) if web_cache else None
 
     lib_timestamp = lib_cache.get_timestamp(arc) if lib_cache else 0.0
     kb_timestamp = kb_cache.get_timestamp(arc) if kb_cache else 0.0
+    web_timestamp = web_cache.get_timestamp(arc) if web_cache else 0.0
 
     # Determine which source to use based on most recent timestamp
-    use_library = False
-    use_kb = False
+    source_type = None
+    timestamps = []
+    if lib_results:
+        timestamps.append(("library", lib_timestamp))
+    if kb_results:
+        timestamps.append(("kb", kb_timestamp))
+    if web_results:
+        timestamps.append(("web", web_timestamp))
 
-    if lib_results and kb_results:
-        # Both have results, use the most recent
-        if lib_timestamp >= kb_timestamp:
-            use_library = True
-        else:
-            use_kb = True
-    elif lib_results:
-        use_library = True
-    elif kb_results:
-        use_kb = True
+    if timestamps:
+        source_type = max(timestamps, key=lambda x: x[1])[0]
 
-    if not use_library and not use_kb:
+    if source_type is None:
         print("No sources available. Run a search first.")
         return
 
-    # Handle library sources
-    if use_library:
-        assert lib_cache is not None  # Guaranteed by use_library check
+    # Handle sources based on type
+    if source_type == "library":
+        assert lib_cache is not None
         await _handle_cli_library_source_command(agent, command, index, arc, lib_cache)
-    # Handle knowledge base sources
-    else:
-        assert kb_results is not None  # Guaranteed by use_kb check
+    elif source_type == "kb":
+        assert kb_results is not None
         _handle_cli_kb_source_command(command, index, kb_results)
+    else:  # web
+        assert web_results is not None
+        _handle_cli_web_source_command(command, index, web_results)
 
 
 async def _handle_cli_library_source_command(
@@ -824,6 +841,28 @@ def _handle_cli_kb_source_command(
         return
 
     detail_text = format_kb_source_detail(kb_results, index)
+    print(detail_text)
+
+
+def _handle_cli_web_source_command(
+    command: str,
+    index: int | None,
+    results: WebSearchCachedResults,
+) -> None:
+    """Handle source commands for web search results in CLI mode."""
+    if command == "list":
+        sources_text = format_web_sources_list(results)
+        print(sources_text)
+        return
+
+    # command == "view" - show full details for the source
+    total_items = len(results.results)
+
+    if index is None or index < 1 or index > total_items:
+        print(f"Invalid source number. Use 1-{total_items}.")
+        return
+
+    detail_text = format_web_source_detail(results, index)
     print(detail_text)
 
 
@@ -1553,44 +1592,49 @@ async def _capture_cli_source_command(
     agent: "MatrixLLMAgent", command: str, index: int | None, arc: str
 ) -> str:
     """Capture output from source command for testing."""
-    # Get both caches
+    # Get all caches
     lib_cache = agent.library_cache
     kb_cache = agent.kb_cache
+    web_cache = agent.web_search_cache
 
     # Get results and timestamps from each cache
     lib_results = lib_cache.get(arc) if lib_cache else None
     kb_results = kb_cache.get(arc) if kb_cache else None
+    web_results = web_cache.get(arc) if web_cache else None
 
     lib_timestamp = lib_cache.get_timestamp(arc) if lib_cache else 0.0
     kb_timestamp = kb_cache.get_timestamp(arc) if kb_cache else 0.0
+    web_timestamp = web_cache.get_timestamp(arc) if web_cache else 0.0
 
-    # Determine which source to use
-    use_library = False
-    use_kb = False
+    # Determine which source to use based on most recent timestamp
+    source_type = None
+    timestamps = []
+    if lib_results:
+        timestamps.append(("library", lib_timestamp))
+    if kb_results:
+        timestamps.append(("kb", kb_timestamp))
+    if web_results:
+        timestamps.append(("web", web_timestamp))
 
-    if lib_results and kb_results:
-        if lib_timestamp >= kb_timestamp:
-            use_library = True
-        else:
-            use_kb = True
-    elif lib_results:
-        use_library = True
-    elif kb_results:
-        use_kb = True
+    if timestamps:
+        source_type = max(timestamps, key=lambda x: x[1])[0]
 
-    if not use_library and not use_kb:
+    if source_type is None:
         return "No sources available. Run a search first."
 
     if command == "list":
-        if use_library:
+        if source_type == "library":
             assert lib_results is not None
             return format_sources_list(lib_results)
-        else:
+        elif source_type == "kb":
             assert kb_results is not None
             return format_kb_sources_list(kb_results)
+        else:  # web
+            assert web_results is not None
+            return format_web_sources_list(web_results)
     else:
         # view command
-        if use_library:
+        if source_type == "library":
             assert lib_results is not None
             if index is None or index < 1 or index > len(lib_results):
                 return f"Invalid source number. Use 1-{len(lib_results)}."
@@ -1598,11 +1642,16 @@ async def _capture_cli_source_command(
             doc_title = result.get("document_title", "Unknown")
             page_num = result.get("page_number", "?")
             return f"Source [{index}]: {doc_title} p.{page_num} [image would be displayed]"
-        else:
+        elif source_type == "kb":
             assert kb_results is not None
             if index is None:
                 return "Invalid source number."
             return format_kb_source_detail(kb_results, index)
+        else:  # web
+            assert web_results is not None
+            if index is None:
+                return "Invalid source number."
+            return format_web_source_detail(web_results, index)
 
 
 async def _capture_cli_library_search(agent: "MatrixLLMAgent", query: str, arc: str) -> str:

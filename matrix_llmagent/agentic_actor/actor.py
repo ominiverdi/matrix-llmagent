@@ -95,6 +95,7 @@ class AgenticLLMActor:
         # Pass caches from agent if available (persist across actor runs)
         library_cache = getattr(self.agent, "library_cache", None)
         kb_cache = getattr(self.agent, "kb_cache", None)
+        web_search_cache = getattr(self.agent, "web_search_cache", None)
         base_executors = create_tool_executors(
             self.config,
             progress_callback=progress_callback,
@@ -103,6 +104,7 @@ class AgenticLLMActor:
             router=self.model_router,
             library_cache=library_cache,
             kb_cache=kb_cache,
+            web_search_cache=web_search_cache,
         )
         tool_executors = {**base_executors, **self.additional_tool_executors}
 
