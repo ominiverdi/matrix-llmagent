@@ -184,8 +184,26 @@ async def interactive_loop(client: AsyncClient) -> None:
                 ],
             )
             if hasattr(response, "room_id"):
-                print(f"Created encrypted DM: {response.room_id}")
-                print("You can now message the bot in this room.")
+                room_id = response.room_id
+                print(f"Created encrypted DM: {room_id}")
+
+                # Query keys for the invited user to ensure we have their device keys
+                print(f"Querying device keys for {user_id}...")
+                await client.keys_query()
+
+                # Send an initial message to establish the Megolm session
+                # This forces key exchange before the other user sends anything
+                print("Sending initial greeting...")
+                await client.room_send(
+                    room_id=room_id,
+                    message_type="m.room.message",
+                    content={
+                        "msgtype": "m.text",
+                        "body": "Hello! I'm ready to chat. How can I help you?",
+                    },
+                    ignore_unverified_devices=True,
+                )
+                print("Done! The other user can now join and send messages.")
             else:
                 print(f"Failed to create DM: {response}")
 
