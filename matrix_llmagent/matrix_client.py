@@ -71,10 +71,15 @@ class MatrixClient:
             logger.error(f"Failed to connect to Matrix: {response}")
             raise ConnectionError(f"Matrix connection failed: {response}")
 
-        # Upload encryption keys if E2EE is enabled
-        if self._encryption_enabled and self.client.should_upload_keys:
-            logger.info("Uploading encryption keys...")
-            await self.client.keys_upload()
+        # For E2EE: do an initial sync to initialize the crypto store,
+        # then upload keys if needed
+        if self._encryption_enabled:
+            logger.info("E2EE enabled, performing initial sync for crypto setup...")
+            await self.client.sync(timeout=10000, full_state=True)
+
+            if self.client.should_upload_keys:
+                logger.info("Uploading encryption keys...")
+                await self.client.keys_upload()
 
     async def sync(self, timeout: int = 30000) -> None:
         """Sync with Matrix server to receive events.
@@ -247,3 +252,28 @@ class MatrixClient:
         """
         self.client.add_event_callback(callback, event_type)
         logger.debug(f"Added event callback for {event_type}")
+
+    def trust_devices_for_user(self, user_id: str) -> None:
+        """Trust all devices for a given user (auto-trust mode).
+
+        This is needed for E2EE - we must trust devices before we can
+        decrypt their messages.
+
+        Args:
+            user_id: Matrix user ID to trust devices for
+        """
+        if not self._encryption_enabled:
+            return
+
+        if user_id not in self.client.device_store.users:
+            logger.debug(f"No devices found for {user_id}")
+            return
+
+        for device_id, device in self.client.device_store[user_id].items():
+            # Skip our own device
+            if user_id == self.client.user_id and device_id == self.client.device_id:
+                continue
+
+            if not self.client.olm.is_device_verified(device):
+                self.client.verify_device(device)
+                logger.info(f"Trusted device {device_id} for user {user_id}")

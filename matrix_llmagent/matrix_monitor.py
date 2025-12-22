@@ -316,6 +316,10 @@ class MatrixMonitor:
             f"session_id={event.session_id}"
         )
 
+        # Try to trust the sender's devices (auto-trust mode)
+        # This might help with future messages
+        self.client.trust_devices_for_user(event.sender)
+
         # Only notify once per room to avoid spam
         # We track this in a simple set on the instance
         if not hasattr(self, "_notified_decrypt_failures"):
