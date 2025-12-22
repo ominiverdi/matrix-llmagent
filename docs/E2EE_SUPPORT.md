@@ -1,68 +1,81 @@
 # End-to-End Encryption (E2EE) Support
 
-## Current Status: Full Implementation with Device Verification
+## Current Status: Full Implementation with Cross-Signing
 
-E2EE support is implemented with emoji verification. For E2EE to work reliably, users must **verify the bot's device** before sending encrypted messages.
+E2EE support is implemented with cross-signing and emoji verification. The bot is cross-signed by its owner, which enables trust via the cross-signing chain.
 
 ### What's Implemented
 
 - Crypto store creation and persistence (`./nio_store/`)
 - Device key generation and upload
 - Automatic key query/claim after sync
+- **Cross-signing support** - bot device is signed by owner's cross-signing keys
 - **Device fingerprint display on startup** for manual verification
 - **Emoji verification support** - bot automatically accepts and processes verification requests
+- **`!verify` command** - users can request device info for manual verification
 - `ignore_unverified_devices=True` for sending messages
 - Graceful degradation (error message when decryption fails)
 - `matrix-invites` CLI tool for managing encrypted room invitations
 
-## How to Use E2EE with the Bot
+## How E2EE Works with the Bot
 
-### Step 1: Note the Bot's Device Fingerprint
+### The Trust Model
 
-When the bot starts, it logs its device fingerprint:
+Matrix E2EE requires devices to be verified before encrypted messages work reliably. There are two ways to establish trust:
 
-```
-Device ID: MATRIX_LLMAGENT
-Device fingerprint (Ed25519): jD1m e6gr WGFw ZrW9 f4mJ NqEP uFL+ ARQv JENu Dkuz aiA
-To verify this bot, check this fingerprint matches in Element...
-```
+1. **Cross-signing chain** (recommended): Verify the bot's owner, and all their devices (including the bot) are automatically trusted
+2. **Direct device verification**: Manually verify the bot's specific device via emoji or fingerprint
 
-### Step 2: Verify the Bot's Device (Required for E2EE)
+### Why "Unable to decrypt" Happens
 
-In Element (or your Matrix client):
+When a user sends an encrypted message:
+1. Their client (Element) creates Megolm session keys
+2. These keys are shared only with **verified/trusted** devices
+3. If the bot's device isn't trusted, it doesn't receive the keys
+4. The bot can receive the message but cannot decrypt it
 
-1. Go to **Settings > Security & Privacy > Cross-signing**
-2. Find the bot's user (e.g., `@bot:matrix.org`)
-3. Click on the bot's device (e.g., `MATRIX_LLMAGENT`)
-4. Choose **"Verify by emoji"** or **"Manually verify by text"**
+The same applies in reverse - if the user hasn't verified the bot, their client may not accept Megolm keys from the bot, showing "Unable to decrypt" for the bot's responses.
 
-**For emoji verification:**
-- Element will send a verification request to the bot
-- The bot automatically accepts and confirms
-- Check the console log to see the emoji sequence
-- Confirm in Element if they match
+## Verifying the Bot
 
-**For manual verification:**
-- Compare the fingerprint in Element with the one the bot logged at startup
-- If they match, click "Verify"
+### Option 1: Cross-Signing Chain (Easiest)
 
-### Step 3: Send Encrypted Messages
+If you verify the bot's owner (@ominiverdi:matrix.org), the bot is automatically trusted:
 
-After verification, Element will share Megolm session keys with the bot, and encrypted messages will work.
+1. In Element, start a DM with @ominiverdi:matrix.org
+2. Click their name > "Verify"
+3. Complete emoji verification
+4. The bot's device is now trusted via cross-signing
 
-## Why Verification is Required
+### Option 2: Use the !verify Command
 
-Matrix E2EE is designed so that clients only share encryption keys with **verified** or **known** devices. Without verification:
+The bot has a built-in command to help with verification:
 
-1. Your client (Element) sees the bot's device as "unverified"
-2. When you send a message, Element may not share the Megolm keys with unverified devices
-3. The bot receives the encrypted message but cannot decrypt it
+1. Send `!verify` to the bot
+2. You'll receive the bot's Device ID and fingerprint
+3. Follow the instructions to manually verify
 
-Verification tells Element: "I trust this device, share keys with it."
+### Option 3: Manual Device Verification in Element
+
+1. Click the bot's name in a chat
+2. Click "View devices" or similar
+3. Find the bot's device (e.g., `ksHi8AOCN8`)
+4. Click "Manually verify by text"
+5. Compare the fingerprint with what the bot shows
+
+Note: Element Web has made this option harder to find in recent versions, preferring cross-signing.
+
+### Option 4: Emoji Verification
+
+1. In Element, find the bot's device and click "Verify"
+2. Choose "Verify by emoji"
+3. The bot automatically accepts and confirms
+4. Check the bot's logs to see the emoji sequence
+5. Confirm in Element if they match
 
 ## Alternative: Unencrypted Rooms
 
-If you don't want to deal with verification, use unencrypted rooms:
+If verification is problematic, use unencrypted rooms:
 
 1. **Create a new room** (not "Start Direct Message")
    - In Element: Click "+" > "New Room"
@@ -76,7 +89,26 @@ If you don't want to deal with verification, use unencrypted rooms:
 
 4. **Start chatting** - the bot will respond normally
 
+## Current Bot Configuration
+
+```
+User: @llm-assitant:matrix.org
+Device ID: ksHi8AOCN8
+Fingerprint: DUTJ dHYR hh9G wNYZ RTpF +vBj bxS4 u07+ wdu6 EX6e bqU
+Cross-signed by: @ominiverdi:matrix.org
+```
+
 ## Technical Details
+
+### Cross-Signing Setup
+
+The bot's cross-signing was set up via:
+
+1. Reset identity at https://account.matrix.org/account/?action=org.matrix.cross_signing_reset
+2. Set up Secure Backup in Element Web
+3. Used `mx` CLI tool to download cross-signing keys and verify the bot's device
+
+Recovery key is stored securely for key recovery if needed.
 
 ### Why E2EE is Complex for Bots
 
@@ -88,7 +120,8 @@ Matrix E2EE uses Olm/Megolm protocols:
 | **Megolm** | Group encryption for room messages |
 | **Device keys** | Each device has identity keys uploaded to homeserver |
 | **Session keys** | Megolm session keys shared via Olm to authorized devices |
-| **Device verification** | Trust establishment so clients share keys |
+| **Cross-signing** | User-level trust that extends to all their devices |
+| **Device verification** | Direct trust establishment between specific devices |
 
 The key insight: **Key sharing is sender-initiated and trust-based**. When you send a message, your client decides which devices get the Megolm session keys based on verification status.
 
@@ -105,7 +138,7 @@ pip install "matrix-nio[e2e]"
 
 **Key files:**
 - `matrix_llmagent/matrix_client.py` - E2EE client, fingerprint display, verification handler
-- `matrix_llmagent/matrix_monitor.py` - MegolmEvent handling, verification callback setup
+- `matrix_llmagent/matrix_monitor.py` - MegolmEvent handling, `!verify` command, verification callback
 - `matrix_llmagent/invite_manager.py` - CLI for room management
 - `./nio_store/` - SQLite crypto store (device keys, sessions)
 
@@ -113,7 +146,7 @@ pip install "matrix-nio[e2e]"
 ```json
 {
   "matrix": {
-    "device_id": "MATRIX_LLMAGENT",
+    "device_id": "ksHi8AOCN8",
     "encryption": {
       "enabled": true,
       "store_path": "./nio_store/"
@@ -122,7 +155,7 @@ pip install "matrix-nio[e2e]"
 }
 ```
 
-**Important:** Keep the same `device_id` across restarts. Changing it creates a new device identity, invalidating existing verifications.
+**Important:** Keep the same `device_id` and `access_token` across restarts. Changing them creates a new device identity, invalidating existing verifications and cross-signing.
 
 ### The Verification Flow
 
@@ -144,20 +177,47 @@ User                          Bot                         Element
 
 ### Troubleshooting
 
-**"Unable to decrypt" after verification:**
+**"Unable to decrypt" from the bot:**
+- You need to verify the bot's device (see options above)
+- Try the `!verify` command to get verification instructions
+- Alternatively, verify @ominiverdi:matrix.org to trust via cross-signing
+
+**"Unable to decrypt" when sending TO the bot:**
+- The bot auto-trusts sender devices, so this is less common
 - Try `/discardsession` in the chat to force a new Megolm session
-- Make sure the bot wasn't restarted with a different `device_id`
-- Check that `./nio_store/` is persistent (not deleted between restarts)
+- The bot will send an error message if it can't decrypt
 
 **Verification request not working:**
 - Ensure the bot is running and connected
-- Check the bot's console for verification events
+- Check the bot's logs for KeyVerification events
 - Try manual verification instead of emoji
 
 **Bot shows as "unverified" after restart:**
 - The `device_id` must be the same across restarts
 - The `./nio_store/` directory must persist
-- If you lose the store, you need to re-verify
+- If you lose the store, you need to re-verify and re-establish cross-signing
+
+## Tools
+
+### mx CLI
+
+The `mx` CLI tool (https://codeberg.org/andybalholm/mx) is useful for:
+- Downloading cross-signing keys: `mx recovery --recovery-key "..." download`
+- Verifying devices: `mx identity verify-device <device_id> <fingerprint>`
+
+Build from source (use commit `22c6f3c` or later):
+```bash
+git clone https://codeberg.org/andybalholm/mx
+cd mx
+cargo build --release
+```
+
+### matrix-invites
+
+Built-in CLI for managing room invitations:
+```bash
+uv run matrix-invites --help
+```
 
 ## References
 
