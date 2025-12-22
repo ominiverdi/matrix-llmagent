@@ -740,7 +740,10 @@ async def _handle_cli_source_command(
         await _handle_cli_library_source_command(agent, command, index, arc, lib_cache)
     elif source_type == "kb":
         assert kb_results is not None
-        _handle_cli_kb_source_command(command, index, kb_results)
+        kb_name = (
+            agent.config.get("tools", {}).get("knowledge_base", {}).get("name", "Knowledge Base")
+        )
+        _handle_cli_kb_source_command(command, index, kb_results, kb_name)
     else:  # web
         assert web_results is not None
         _handle_cli_web_source_command(command, index, web_results)
@@ -824,12 +827,13 @@ def _handle_cli_kb_source_command(
     command: str,
     index: int | None,
     results: KBCachedResults,
+    kb_name: str = "Knowledge Base",
 ) -> None:
     """Handle source commands for knowledge base results in CLI mode."""
     kb_results = results
 
     if command == "list":
-        sources_text = format_kb_sources_list(kb_results)
+        sources_text = format_kb_sources_list(kb_results, kb_name)
         print(sources_text)
         return
 
@@ -1628,7 +1632,12 @@ async def _capture_cli_source_command(
             return format_sources_list(lib_results)
         elif source_type == "kb":
             assert kb_results is not None
-            return format_kb_sources_list(kb_results)
+            kb_name = (
+                agent.config.get("tools", {})
+                .get("knowledge_base", {})
+                .get("name", "Knowledge Base")
+            )
+            return format_kb_sources_list(kb_results, kb_name)
         else:  # web
             assert web_results is not None
             return format_web_sources_list(web_results)

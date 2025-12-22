@@ -1014,9 +1014,12 @@ Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY
     ) -> None:
         """Handle source commands for knowledge base results."""
         kb_results = results
+        kb_name = (
+            self.config.get("tools", {}).get("knowledge_base", {}).get("name", "Knowledge Base")
+        )
 
         if command == "list":
-            sources_text = format_kb_sources_list(kb_results)
+            sources_text = format_kb_sources_list(kb_results, kb_name)
             await self.client.send_message(room_id, sources_text)
             return
 

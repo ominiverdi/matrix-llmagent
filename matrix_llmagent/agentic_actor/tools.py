@@ -307,7 +307,7 @@ class KnowledgeBaseResultsCache:
         return time.time() - entry.timestamp > self.ttl_seconds
 
 
-def format_kb_sources_list(results: KBCachedResults) -> str:
+def format_kb_sources_list(results: KBCachedResults, kb_name: str = "Knowledge Base") -> str:
     """Format cached KB search results as a sources list.
 
     Shows pages and entities with short snippets, allowing users to
@@ -315,6 +315,7 @@ def format_kb_sources_list(results: KBCachedResults) -> str:
 
     Args:
         results: Cached search results from knowledge base search.
+        kb_name: Name of the knowledge base (from config).
 
     Returns:
         Formatted string with numbered sources for !source N command.
@@ -322,7 +323,7 @@ def format_kb_sources_list(results: KBCachedResults) -> str:
     if not results.pages and not results.entities:
         return "No sources available. Run a knowledge base search first."
 
-    lines = ["**Sources from last search (Wiki):**", ""]
+    lines = [f"**Sources from last search ({kb_name}):**", ""]
     index = 1
 
     # Pages first
