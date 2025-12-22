@@ -204,7 +204,7 @@ def format_sources_list(results: list[dict]) -> str:
     if not results:
         return "No sources available. Run a library search first."
 
-    lines = ["**Sources from last search:**", ""]
+    lines = ["Sources from last search:", ""]
 
     for i, result in enumerate(results, 1):
         doc_title = result.get("document_title", "Unknown")
@@ -224,7 +224,7 @@ def format_sources_list(results: list[dict]) -> str:
             lines.append(f'  [{i}] {doc_title} p.{page} - "{snippet}"')
 
     lines.append("")
-    lines.append("View source page: `!source N`")
+    lines.append("View source page: !source N")
 
     return "\n".join(lines)
 

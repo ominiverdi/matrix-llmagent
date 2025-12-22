@@ -17,7 +17,7 @@
     },
     {
       "input": "!sources",
-      "expect_contains": ["Sources from last search (Wiki)", "QGIS"],
+      "expect_contains": ["Sources from last search (OSGeo Wiki)", "QGIS"],
       "expect_not_contains": ["No sources available"]
     },
     {
@@ -28,7 +28,7 @@
     {
       "input": "!sources",
       "expect_contains": ["Sources from last search:"],
-      "expect_not_contains": ["Sources from last search (Wiki)"]
+      "expect_not_contains": ["Sources from last search (OSGeo Wiki)"]
     },
     {
       "input": "!source 1",
@@ -42,7 +42,7 @@
     },
     {
       "input": "!sources",
-      "expect_contains": ["Sources from last search (Wiki)", "MapServer"],
+      "expect_contains": ["Sources from last search (OSGeo Wiki)", "MapServer"],
       "expect_not_contains": ["No sources available"]
     }
   ]

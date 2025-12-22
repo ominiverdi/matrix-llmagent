@@ -323,7 +323,7 @@ def format_kb_sources_list(results: KBCachedResults, kb_name: str = "Knowledge B
     if not results.pages and not results.entities:
         return "No sources available. Run a knowledge base search first."
 
-    lines = [f"**Sources from last search ({kb_name}):**", ""]
+    lines = [f"Sources from last search ({kb_name}):", ""]
     index = 1
 
     # Pages first
@@ -353,7 +353,7 @@ def format_kb_sources_list(results: KBCachedResults, kb_name: str = "Knowledge B
         index += 1
 
     lines.append("")
-    lines.append("View full details: `!source N`")
+    lines.append("View full details: !source N")
 
     return "\n".join(lines)
 
@@ -381,15 +381,15 @@ def format_kb_source_detail(results: KBCachedResults, index: int) -> str:
         resume = page.get("resume", "").strip()
         keywords = page.get("keywords", "")
 
-        lines = [f"**[{index}] {title}**", ""]
+        lines = [f"[{index}] {title}", ""]
         if resume:
             lines.append(resume)
             lines.append("")
         if keywords:
-            lines.append(f"**Keywords:** {keywords}")
+            lines.append(f"Keywords: {keywords}")
             lines.append("")
         if url:
-            lines.append(f"**URL:** {url}")
+            lines.append(f"URL: {url}")
 
         return "\n".join(lines)
     else:
@@ -401,9 +401,9 @@ def format_kb_source_detail(results: KBCachedResults, index: int) -> str:
         url = entity.get("url", "")
 
         type_suffix = f" ({ent_type})" if ent_type else ""
-        lines = [f"**[{index}] {name}{type_suffix}**", ""]
+        lines = [f"[{index}] {name}{type_suffix}", ""]
         if url:
-            lines.append(f"**URL:** {url}")
+            lines.append(f"URL: {url}")
 
         return "\n".join(lines)
 
@@ -496,7 +496,7 @@ def format_web_sources_list(results: WebSearchCachedResults) -> str:
     if not results.results:
         return "No sources available. Run a web search first."
 
-    lines = [f"**Sources from last web search** (query: {results.query}):", ""]
+    lines = [f"Sources from last web search (query: {results.query}):", ""]
 
     for i, result in enumerate(results.results, 1):
         title = result.get("title", "Unknown")
@@ -513,7 +513,7 @@ def format_web_sources_list(results: WebSearchCachedResults) -> str:
             lines.append(f"      {url}")
 
     lines.append("")
-    lines.append("View full details: `!source N`")
+    lines.append("View full details: !source N")
 
     return "\n".join(lines)
 
@@ -536,12 +536,12 @@ def format_web_source_detail(results: WebSearchCachedResults, index: int) -> str
     url = result.get("url", "")
     description = result.get("description", "").strip()
 
-    lines = [f"**[{index}] {title}**", ""]
+    lines = [f"[{index}] {title}", ""]
     if description:
         lines.append(description)
         lines.append("")
     if url:
-        lines.append(f"**URL:** {url}")
+        lines.append(f"URL: {url}")
 
     return "\n".join(lines)
 

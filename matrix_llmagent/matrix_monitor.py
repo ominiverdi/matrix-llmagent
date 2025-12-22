@@ -572,56 +572,54 @@ class MatrixMonitor:
         if ":" in str(default_model):
             default_model = default_model.split(":")[-1]
 
-        help_text = f"""**Available Commands**
+        help_text = f"""Available Commands
 
-**Modes:**
-- `!s <message>` - Serious mode (default: {default_model})
-- `!d <message>` - Sarcastic mode - witty, humorous responses
-- `!a <message>` - Agent mode - multi-turn research with tool chaining
-- `!p <message>` - Perplexity mode - web-enhanced AI responses
-- `!l <query>` - Library search - direct search without LLM
-- `!u <message>` - Unsafe mode - uncensored responses
-- `!v <message>` - Verbose mode - get detailed responses instead of concise ones
-- `!h` - Show this help message
+Modes:
+  !s <message> - Serious mode (default: {default_model})
+  !d <message> - Sarcastic mode - witty, humorous responses
+  !a <message> - Agent mode - multi-turn research with tool chaining
+  !p <message> - Perplexity mode - web-enhanced AI responses
+  !l <query> - Library search - direct search without LLM
+  !u <message> - Unsafe mode - uncensored responses
+  !v <message> - Verbose mode - get detailed responses instead of concise ones
+  !h - Show this help message
 
-**Page Navigation (after viewing a document page):**
-- `!next` - Next page
-- `!prev` - Previous page
-- `!page N` - Jump to page N
+Page Navigation (after viewing a document page):
+  !next - Next page
+  !prev - Previous page
+  !page N - Jump to page N
 
-**Source Viewing (golden cord - view source pages):**
-- `!sources` - List sources from last search
-- `!source N` - View source page N
+Source Viewing (golden cord - view source pages):
+  !sources - List sources from last search
+  !source N - View source page N
 
-**Model Comparison Slots:**{model_slots_text}
+Model Comparison Slots:{model_slots_text}
 
-**Tools Available:**
-- Web search and webpage visiting
-- Code execution (if configured)
-- Image generation (if configured)"""
+Tools Available:
+  - Web search and webpage visiting
+  - Code execution (if configured)
+  - Image generation (if configured)"""
 
         if kb_name:
-            help_text += f"\n- {kb_name} search"
+            help_text += f"\n  - {kb_name} search"
 
         help_text += """
 
-**Examples:**
-```
-llm-assistant: what is Python?
-llm-assistant: !v explain machine learning
-llm-assistant: !d tell me a programming joke
-llm-assistant: !a research recent AI developments
-llm-assistant: !l mercator projection
-```
+Examples:
+  llm-assistant: what is Python?
+  llm-assistant: !v explain machine learning
+  llm-assistant: !d tell me a programming joke
+  llm-assistant: !a research recent AI developments
+  llm-assistant: !l mercator projection
 
-**Tips:**
-- Responses are concise by default (1 sentence) - say "tell me more" for details
-- Use `!v` prefix when you need a comprehensive answer upfront
-- Use `!a` for complex research that needs multiple steps
-- Use `!d` when you want fun, sarcastic responses
-- Use `!l` for quick library search, then `show N` to view images
-- Ask "show me page N of <document>" to browse document pages
-- Use `!next`/`!prev`/`!page N` for quick page navigation"""
+Tips:
+  - Responses are concise by default (1 sentence) - say "tell me more" for details
+  - Use !v prefix when you need a comprehensive answer upfront
+  - Use !a for complex research that needs multiple steps
+  - Use !d when you want fun, sarcastic responses
+  - Use !l for quick library search, then show N to view images
+  - Ask "show me page N of <document>" to browse document pages
+  - Use !next/!prev/!page N for quick page navigation"""
 
         await self.client.send_message(room_id, help_text)
 
@@ -634,31 +632,29 @@ llm-assistant: !l mercator projection
             "Search scientific documents, view figures, tables, and equations.",
         )
 
-        help_text = f"""**{lib_name}**
+        help_text = f"""{lib_name}
 {lib_description}
 
-**Commands:**
-- `!l <query>` - Search the library
+Commands:
+  !l <query> - Search the library
 
-**View Sources (golden cord):**
-- `!sources` - List sources from last search
-- `!source N` - View source page N
+View Sources (golden cord):
+  !sources - List sources from last search
+  !source N - View source page N
 
-**View Elements:**
-- `show N` - View element N (figure/table/equation)
+View Elements:
+  show N - View element N (figure/table/equation)
 
-**Page Navigation:**
-- `!next` / `!prev` - Navigate pages
-- `!page N` - Jump to page N
+Page Navigation:
+  !next / !prev - Navigate pages
+  !page N - Jump to page N
 
-**Examples:**
-```
-!l mercator projection
-!sources
-!source 2
-show 3
-!next
-```
+Examples:
+  !l mercator projection
+  !sources
+  !source 2
+  show 3
+  !next
 
 Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY_TOUR.md"""
 

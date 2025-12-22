@@ -142,7 +142,16 @@ class TestToolExecutors:
             mock_session_cls.return_value.__aenter__.return_value = mock_session
 
             mock_response = AsyncMock()
-            mock_response.text.return_value = "Search results"
+            # Jina now uses JSON response format
+            mock_response.json.return_value = {
+                "data": [
+                    {
+                        "title": "Test Result",
+                        "url": "https://example.com",
+                        "description": "Search results description",
+                    }
+                ]
+            }
             mock_response.raise_for_status = MagicMock()
 
             mock_get_ctx = AsyncMock()
@@ -159,7 +168,8 @@ class TestToolExecutors:
                 in result
             )
             assert "## Search Results" in result
-            assert "Search results" in result
+            assert "Test Result" in result
+            assert "Search results description" in result
 
     @pytest.mark.asyncio
     async def test_webpage_visitor_invalid_url(self):
@@ -1005,9 +1015,9 @@ class TestKBSourcesFormatting:
             timestamp=0,
         )
 
-        output = format_kb_sources_list(results)
+        output = format_kb_sources_list(results, kb_name="OSGeo Wiki")
 
-        assert "Sources from last search (Wiki)" in output
+        assert "Sources from last search (OSGeo Wiki)" in output
         assert "[1] GeoServer Documentation" in output
         assert "GeoServer is an open source" in output
         assert "https://wiki.osgeo.org/GeoServer" in output

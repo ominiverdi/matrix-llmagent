@@ -414,7 +414,7 @@ class TestSourcesCommand:
         # Test !sources (list)
         result = await _capture_cli_source_command(agent, "list", None, arc)
 
-        assert "Sources from last search (Wiki)" in result
+        assert "Sources from last search (Knowledge Base)" in result
         assert "GeoServer" in result
         assert "OSGeo Foundation" in result
         assert "!source N" in result
@@ -576,5 +576,5 @@ class TestSourcesCommand:
         # KB is more recent, should be used
         result = await _capture_cli_source_command(agent, "list", None, arc)
 
-        assert "Sources from last search (Wiki)" in result  # KB format
+        assert "Sources from last search (Knowledge Base)" in result  # KB format
         assert "New KB Page" in result
