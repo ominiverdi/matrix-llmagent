@@ -364,6 +364,9 @@ class MatrixClient:
         Args:
             event: Key verification event from another device
         """
+        # Log all verification events for debugging
+        logger.info(f"Received KeyVerificationEvent: {type(event).__name__} from {event.sender}")
+
         if isinstance(event, KeyVerificationStart):
             # Incoming verification request
             if "emoji" not in event.short_authentication_string:

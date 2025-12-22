@@ -436,6 +436,11 @@ class MatrixMonitor:
             await self._send_help(room_id)
             return
 
+        # Handle verify command - show device info for manual verification
+        if clean_message.lower().strip() in ("!verify", "!fingerprint"):
+            await self._send_verify_info(room_id, sender)
+            return
+
         # Handle !l library search (direct, no LLM)
         if (
             clean_message.lower() == "!l"
@@ -661,6 +666,7 @@ class MatrixMonitor:
 
         mode_lines.append("  !v <message> - Verbose mode - detailed responses")
         mode_lines.append("  !h - Show this help message")
+        mode_lines.append("  !verify - Show device info for E2EE verification")
 
         # Build numbered model slots
         slot_lines = []
@@ -752,6 +758,43 @@ Examples:
 Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY_TOUR.md"""
 
         await self.client.send_message(room_id, help_text)
+
+    async def _send_verify_info(self, room_id: str, sender: str) -> None:
+        """Send device verification info to help users verify the bot.
+
+        Args:
+            room_id: Matrix room ID
+            sender: User who requested verification
+        """
+        fingerprint = self.client.get_device_fingerprint()
+        device_id = self.client.device_id
+
+        if not fingerprint:
+            await self.client.send_message(
+                room_id,
+                "E2EE is not enabled for this bot.",
+            )
+            return
+
+        verify_text = f"""Device Verification Info
+
+If you see "Unable to decrypt" errors from me, you need to verify my device.
+
+My Device ID: {device_id}
+My Fingerprint: {fingerprint}
+
+How to verify in Element Web:
+1. Click my name in this chat
+2. Click "View devices" (or similar)
+3. Find device "{device_id}"
+4. Click "Manually verify" and confirm the fingerprint matches
+
+Alternative: If you've already verified the bot owner (@ominiverdi:matrix.org),
+my device should be automatically trusted via cross-signing.
+
+After verification, encrypted messages should work correctly."""
+
+        await self.client.send_message(room_id, verify_text)
 
     async def handle_proactive(self, room_id: str, sender: str, message: str) -> None:
         """Handle proactive interjecting.
