@@ -20,7 +20,11 @@ from .agentic_actor.library_tool import (
     search_library_direct,
 )
 from .agentic_actor.tools import (
+    KBCachedResults,
+    KnowledgeBaseResultsCache,
     entity_info_tool_def,
+    format_kb_source_detail,
+    format_kb_sources_list,
     knowledge_base_tool_def,
     relationship_search_tool_def,
 )
@@ -105,6 +109,15 @@ class MatrixLLMAgent:
             )
             self.additional_tools.append(dict(entity_info_tool_def(kb_name)))
             logger.info(f"Knowledge base tool enabled: {kb_name}")
+
+        # Add kb_cache for knowledge base sources
+        self.kb_cache: KnowledgeBaseResultsCache | None = None
+        if kb_config.get("enabled") and kb_config.get("database_url"):
+            cache_config = kb_config.get("cache", {})
+            self.kb_cache = KnowledgeBaseResultsCache(
+                ttl_hours=cache_config.get("ttl_hours", 24),
+                max_rooms=cache_config.get("max_rooms", 100),
+            )
 
         # Add library_search tool if configured
         lib_config = self.config.get("tools", {}).get("library", {})
@@ -668,28 +681,65 @@ async def _handle_cli_source_command(
     """Handle source viewing commands in CLI mode (!sources, !source N).
 
     The 'golden cord' - lets users see sources from last search and
-    view the actual source pages.
+    view the actual source pages. Supports both library and knowledge base sources.
 
     Args:
-        agent: MatrixLLMAgent instance with library_cache
+        agent: MatrixLLMAgent instance with library_cache and kb_cache
         command: 'list' or 'view'
         index: Source index for 'view', None for 'list'
         arc: Arc identifier for cache lookup
     """
-    lib_config = agent.config.get("tools", {}).get("library", {})
-    if not lib_config.get("enabled") or not lib_config.get("base_url"):
-        print("Library is not configured.")
+    # Get both caches
+    lib_cache = agent.library_cache
+    kb_cache = agent.kb_cache
+
+    # Get results and timestamps from each cache
+    lib_results = lib_cache.get(arc) if lib_cache else None
+    kb_results = kb_cache.get(arc) if kb_cache else None
+
+    lib_timestamp = lib_cache.get_timestamp(arc) if lib_cache else 0.0
+    kb_timestamp = kb_cache.get_timestamp(arc) if kb_cache else 0.0
+
+    # Determine which source to use based on most recent timestamp
+    use_library = False
+    use_kb = False
+
+    if lib_results and kb_results:
+        # Both have results, use the most recent
+        if lib_timestamp >= kb_timestamp:
+            use_library = True
+        else:
+            use_kb = True
+    elif lib_results:
+        use_library = True
+    elif kb_results:
+        use_kb = True
+
+    if not use_library and not use_kb:
+        print("No sources available. Run a search first.")
         return
 
-    cache = agent.library_cache
-    if cache is None:
-        print("No sources available. Run a library search first.")
-        return
+    # Handle library sources
+    if use_library:
+        assert lib_cache is not None  # Guaranteed by use_library check
+        await _handle_cli_library_source_command(agent, command, index, arc, lib_cache)
+    # Handle knowledge base sources
+    else:
+        assert kb_results is not None  # Guaranteed by use_kb check
+        _handle_cli_kb_source_command(command, index, kb_results)
 
+
+async def _handle_cli_library_source_command(
+    agent: "MatrixLLMAgent",
+    command: str,
+    index: int | None,
+    arc: str,
+    cache: LibraryResultsCache,
+) -> None:
+    """Handle source commands for library results in CLI mode."""
     results = cache.get(arc)
 
     if command == "list":
-        # Show all sources from last search
         if not results:
             print("No sources available. Run a library search first.")
             return
@@ -718,7 +768,12 @@ async def _handle_cli_source_command(
         return
 
     # Fetch the page
-    base_url = lib_config["base_url"]
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    base_url = lib_config.get("base_url")
+    if not base_url:
+        print("Library is not configured.")
+        return
+
     print(f"Fetching p.{page_num} of '{doc_title}'...")
 
     page_result = await fetch_library_page(base_url, doc_slug, page_num)
@@ -746,6 +801,30 @@ async def _handle_cli_source_command(
         print("(Page image could not be rendered)")
 
     print("\n[!next/!prev to navigate, !sources to list all]")
+
+
+def _handle_cli_kb_source_command(
+    command: str,
+    index: int | None,
+    results: KBCachedResults,
+) -> None:
+    """Handle source commands for knowledge base results in CLI mode."""
+    kb_results = results
+
+    if command == "list":
+        sources_text = format_kb_sources_list(kb_results)
+        print(sources_text)
+        return
+
+    # command == "view" - show full details for the source
+    total_items = len(kb_results.pages) + len(kb_results.entities)
+
+    if index is None or index < 1 or index > total_items:
+        print(f"Invalid source number. Use 1-{total_items}.")
+        return
+
+    detail_text = format_kb_source_detail(kb_results, index)
+    print(detail_text)
 
 
 async def cli_message(message: str, config_path: str | None = None) -> None:
@@ -1199,6 +1278,362 @@ async def cli_interactive(config_path: str | None = None) -> None:
         await agent.history.close()
 
 
+async def run_conversation_test(
+    test_file: str,
+    config_path: str | None = None,
+    verbose: bool = False,
+) -> bool:
+    """Run a multi-turn conversation test from JSON file.
+
+    Test file format:
+    {
+        "description": "Test description",
+        "timeout_seconds": 300,
+        "mode": "serious",
+        "steps": [
+            {
+                "input": "User message",
+                "expect_contains": ["expected", "strings"],
+                "expect_not_contains": ["unwanted", "strings"]
+            }
+        ]
+    }
+
+    Args:
+        test_file: Path to JSON test file
+        config_path: Optional path to config file
+        verbose: Print full responses if True
+
+    Returns:
+        True if all steps pass, False otherwise
+    """
+    import time as time_module
+
+    # Load test file
+    test_path = Path(test_file)
+    if not test_path.exists():
+        print(f"Error: Test file not found: {test_file}")
+        return False
+
+    try:
+        with open(test_path) as f:
+            test_data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in test file: {e}")
+        return False
+
+    description = test_data.get("description", test_path.stem)
+    timeout_seconds = test_data.get("timeout_seconds", 300)
+    test_mode = test_data.get("mode", "serious")
+    steps = test_data.get("steps", [])
+
+    if not steps:
+        print("Error: No steps defined in test file")
+        return False
+
+    # Load configuration
+    config_file = Path(config_path) if config_path else Path(__file__).parent.parent / "config.json"
+
+    if not config_file.exists():
+        print(f"Error: Config file not found at {config_file}")
+        return False
+
+    print(f"\n{'=' * 60}")
+    print(f"Conversation Test: {description}")
+    print(f"{'=' * 60}")
+    print(f"Mode: {test_mode} | Steps: {len(steps)} | Timeout: {timeout_seconds}s/step")
+    print()
+
+    try:
+        agent = MatrixLLMAgent(str(config_file))
+        await agent.history.initialize()
+        await agent.chronicle.initialize()
+
+        # Use a unique arc for this test run
+        arc = f"cli#test_{int(time_module.time())}"
+
+        # Get mode configuration
+        command_config = agent.config.get("matrix", {}).get("command", {})
+        modes = command_config.get("modes", {})
+        mode_cfg = modes.get(test_mode, {})
+
+        if not mode_cfg:
+            print(f"Error: Mode '{test_mode}' not configured")
+            return False
+
+        # Build system prompt
+        system_prompt = mode_cfg.get("system_prompt", "You are a helpful assistant.")
+        system_prompt = system_prompt.replace("{mynick}", "CLI-Bot")
+        system_prompt += (
+            " Keep responses to 1 sentence max. Users can say 'tell me more' for details."
+        )
+
+        # Track results
+        results: list[dict[str, Any]] = []
+        passed = 0
+        failed = 0
+
+        # Conversation context (maintains history across steps)
+        context: list[dict[str, str]] = []
+
+        for i, step in enumerate(steps, 1):
+            step_input = step.get("input", "")
+            expect_contains = step.get("expect_contains", [])
+            expect_not_contains = step.get("expect_not_contains", [])
+
+            print(
+                f'[Step {i}/{len(steps)}] "{step_input[:50]}{"..." if len(step_input) > 50 else ""}"'
+            )
+
+            start_time = time_module.time()
+            response = ""
+            iterations = 0
+            is_command = False
+
+            try:
+                # Check if this is a command (not sent to LLM)
+                if step_input.startswith("!"):
+                    is_command = True
+                    # Handle various commands
+                    show_indices = _parse_show_indices(step_input)
+                    if show_indices is not None:
+                        # Capture show command output
+                        response = await _capture_cli_show_command(agent, show_indices)
+                    else:
+                        page_cmd = _parse_page_command(step_input)
+                        if page_cmd is not None:
+                            cmd, page_num = page_cmd
+                            response = await _capture_cli_page_command(agent, cmd, page_num, arc)
+                        else:
+                            source_cmd = _parse_source_command(step_input)
+                            if source_cmd is not None:
+                                cmd, idx = source_cmd
+                                response = await _capture_cli_source_command(agent, cmd, idx, arc)
+                            elif step_input.lower().startswith("!l "):
+                                query = step_input[3:].strip()
+                                response = await _capture_cli_library_search(agent, query, arc)
+                            else:
+                                # Unknown command, treat as regular message
+                                is_command = False
+
+                if not is_command:
+                    # Regular message - send to LLM
+                    context.append({"role": "user", "content": step_input})
+
+                    response = await agent.run_actor(
+                        context,
+                        mode_cfg=mode_cfg,
+                        system_prompt=system_prompt,
+                        arc=arc,
+                    )
+                    response = response or ""
+
+                    # Add response to context for conversation continuity
+                    if response:
+                        context.append({"role": "assistant", "content": response})
+
+                    # Try to get iteration count from actor (if available)
+                    iterations = getattr(agent, "_last_iterations", 0)
+
+            except TimeoutError:
+                response = f"TIMEOUT after {timeout_seconds}s"
+            except Exception as e:
+                response = f"ERROR: {e}"
+
+            elapsed = time_module.time() - start_time
+
+            # Check assertions
+            missing = []
+            unwanted = []
+
+            for expected in expect_contains:
+                if expected.lower() not in response.lower():
+                    missing.append(expected)
+
+            for not_expected in expect_not_contains:
+                if not_expected.lower() in response.lower():
+                    unwanted.append(not_expected)
+
+            step_passed = len(missing) == 0 and len(unwanted) == 0
+
+            # Record result
+            result = {
+                "step": i,
+                "input": step_input,
+                "passed": step_passed,
+                "elapsed": elapsed,
+                "iterations": iterations if not is_command else 0,
+                "is_command": is_command,
+                "response_length": len(response),
+            }
+            results.append(result)
+
+            if step_passed:
+                passed += 1
+                status = "PASS"
+            else:
+                failed += 1
+                status = "FAIL"
+
+            # Print result
+            print(f"  Status: {status}")
+            if is_command:
+                print("  Type: command")
+            else:
+                print(f"  Iterations: {iterations}")
+            print(f"  Time: {elapsed:.1f}s")
+
+            if not step_passed:
+                if missing:
+                    print(f"  Missing: {missing}")
+                if unwanted:
+                    print(f"  Unwanted: {unwanted}")
+
+            if verbose or not step_passed:
+                # Show response preview
+                preview = response[:200] + "..." if len(response) > 200 else response
+                preview = preview.replace("\n", " ")
+                print(f"  Response: {preview}")
+
+            print()
+
+        # Summary
+        print(f"{'=' * 60}")
+        total = passed + failed
+        status_str = "PASSED" if failed == 0 else "FAILED"
+        print(f"Result: {passed}/{total} {status_str}")
+
+        # Print timing summary
+        total_time = sum(r["elapsed"] for r in results)
+        llm_steps = [r for r in results if not r["is_command"]]
+        if llm_steps:
+            avg_time = sum(r["elapsed"] for r in llm_steps) / len(llm_steps)
+            total_iterations = sum(r["iterations"] for r in llm_steps)
+            print(
+                f"Total time: {total_time:.1f}s | Avg LLM step: {avg_time:.1f}s | Total iterations: {total_iterations}"
+            )
+
+        print(f"{'=' * 60}\n")
+
+        return failed == 0
+
+    except Exception as e:
+        logger.error(f"Conversation test error: {e}")
+        print(f"Error: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+    finally:
+        await agent.history.close()
+
+
+async def _capture_cli_show_command(agent: "MatrixLLMAgent", indices: list[int]) -> str:
+    """Capture output from show command for testing."""
+    # For now, return a simple message - show command displays images
+    return f"Show command executed for indices: {indices}"
+
+
+async def _capture_cli_page_command(
+    agent: "MatrixLLMAgent", command: str, page_num: int | None, arc: str
+) -> str:
+    """Capture output from page command for testing."""
+    cache = agent.library_cache
+    if cache is None:
+        return "No page navigation available. Run a library search first."
+
+    page_view = cache.get_page_view(arc)
+    if page_view is None:
+        return "No page navigation available. View a source first."
+
+    return f"Page command '{command}' executed. Current: p.{page_view.page}/{page_view.total_pages}"
+
+
+async def _capture_cli_source_command(
+    agent: "MatrixLLMAgent", command: str, index: int | None, arc: str
+) -> str:
+    """Capture output from source command for testing."""
+    # Get both caches
+    lib_cache = agent.library_cache
+    kb_cache = agent.kb_cache
+
+    # Get results and timestamps from each cache
+    lib_results = lib_cache.get(arc) if lib_cache else None
+    kb_results = kb_cache.get(arc) if kb_cache else None
+
+    lib_timestamp = lib_cache.get_timestamp(arc) if lib_cache else 0.0
+    kb_timestamp = kb_cache.get_timestamp(arc) if kb_cache else 0.0
+
+    # Determine which source to use
+    use_library = False
+    use_kb = False
+
+    if lib_results and kb_results:
+        if lib_timestamp >= kb_timestamp:
+            use_library = True
+        else:
+            use_kb = True
+    elif lib_results:
+        use_library = True
+    elif kb_results:
+        use_kb = True
+
+    if not use_library and not use_kb:
+        return "No sources available. Run a search first."
+
+    if command == "list":
+        if use_library:
+            assert lib_results is not None
+            return format_sources_list(lib_results)
+        else:
+            assert kb_results is not None
+            return format_kb_sources_list(kb_results)
+    else:
+        # view command
+        if use_library:
+            assert lib_results is not None
+            if index is None or index < 1 or index > len(lib_results):
+                return f"Invalid source number. Use 1-{len(lib_results)}."
+            result = lib_results[index - 1]
+            doc_title = result.get("document_title", "Unknown")
+            page_num = result.get("page_number", "?")
+            return f"Source [{index}]: {doc_title} p.{page_num} [image would be displayed]"
+        else:
+            assert kb_results is not None
+            if index is None:
+                return "Invalid source number."
+            return format_kb_source_detail(kb_results, index)
+
+
+async def _capture_cli_library_search(agent: "MatrixLLMAgent", query: str, arc: str) -> str:
+    """Capture output from library search for testing."""
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        return "Library search is not configured."
+
+    lib_name = lib_config.get("name", "OSGeo Library")
+    max_results = lib_config.get("max_results", 10)
+
+    # Ensure cache exists
+    if agent.library_cache is None:
+        cache_config = lib_config.get("cache", {})
+        agent.library_cache = LibraryResultsCache(
+            ttl_hours=cache_config.get("ttl_hours", 24),
+            max_rooms=cache_config.get("max_rooms", 100),
+        )
+
+    results, formatted = await search_library_direct(
+        base_url=lib_config["base_url"],
+        query=query,
+        cache=agent.library_cache,
+        arc=arc,
+        name=lib_name,
+        limit=max_results,
+    )
+
+    return formatted
+
+
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -1224,6 +1659,18 @@ def main() -> None:
     parser.add_argument(
         "--arc", type=str, help="Arc name for Chronicler (required with --chronicler)"
     )
+    parser.add_argument(
+        "--test-conversation",
+        type=str,
+        metavar="FILE",
+        help="Run a multi-turn conversation test from JSON file",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Verbose output for conversation tests",
+    )
 
     args = parser.parse_args()
 
@@ -1233,6 +1680,12 @@ def main() -> None:
             sys.exit(1)
         asyncio.run(cli_chronicler(args.arc, args.chronicler, args.config))
         return
+
+    if args.test_conversation:
+        success = asyncio.run(
+            run_conversation_test(args.test_conversation, args.config, args.verbose)
+        )
+        sys.exit(0 if success else 1)
 
     if args.interactive:
         asyncio.run(cli_interactive(args.config))

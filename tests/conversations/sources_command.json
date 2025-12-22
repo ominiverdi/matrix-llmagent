@@ -1,0 +1,12 @@
+{
+  "description": "Test !sources command shows 'no sources' when no search has been run",
+  "timeout_seconds": 60,
+  "mode": "serious",
+  "steps": [
+    {
+      "input": "!sources",
+      "expect_contains": ["No sources available"],
+      "expect_not_contains": []
+    }
+  ]
+}

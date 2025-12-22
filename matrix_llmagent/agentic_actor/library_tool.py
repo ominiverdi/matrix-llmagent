@@ -98,6 +98,13 @@ class LibraryResultsCache:
 
         return entry.results
 
+    def get_timestamp(self, room_id: str) -> float:
+        """Get the timestamp of cached results for a room. Returns 0 if not found."""
+        entry = self._cache.get(room_id)
+        if entry is None or self._is_expired(entry):
+            return 0.0
+        return entry.timestamp
+
     def clear(self, room_id: str) -> None:
         """Clear cached results for a room."""
         if room_id in self._cache:

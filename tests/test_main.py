@@ -359,3 +359,222 @@ class TestMultiProviderRouting:
             # Verify it was created with correct provider key
             assert client._provider_key == "llamacpp3"
             assert client.config["base_url"] == "http://localhost:8082/v1"
+
+
+class TestSourcesCommand:
+    """Test !sources and !source N command functionality.
+
+    These tests pre-populate the cache to test the command logic
+    without requiring LLM calls.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sources_no_cache(self, temp_config_file):
+        """Test !sources when no search has been run."""
+        from matrix_llmagent.main import _capture_cli_source_command
+
+        agent = MatrixLLMAgent(temp_config_file)
+        arc = "cli#test"
+
+        # No cache populated
+        result = await _capture_cli_source_command(agent, "list", None, arc)
+
+        assert "No sources available" in result
+
+    @pytest.mark.asyncio
+    async def test_sources_with_kb_cache(self, temp_config_file):
+        """Test !sources with pre-populated KB cache."""
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+        from matrix_llmagent.main import _capture_cli_source_command
+
+        agent = MatrixLLMAgent(temp_config_file)
+        arc = "cli#test"
+
+        # Pre-populate KB cache
+        agent.kb_cache = KnowledgeBaseResultsCache()
+        agent.kb_cache.store(
+            arc,
+            pages=[
+                {
+                    "page_title": "GeoServer",
+                    "url": "https://wiki.osgeo.org/GeoServer",
+                    "resume": "GeoServer is an open source server for sharing geospatial data.",
+                    "keywords": "GIS, mapping",
+                }
+            ],
+            entities=[
+                {
+                    "entity_name": "OSGeo Foundation",
+                    "entity_type": "Organization",
+                    "url": "https://wiki.osgeo.org/OSGeo",
+                }
+            ],
+        )
+
+        # Test !sources (list)
+        result = await _capture_cli_source_command(agent, "list", None, arc)
+
+        assert "Sources from last search (Wiki)" in result
+        assert "GeoServer" in result
+        assert "OSGeo Foundation" in result
+        assert "!source N" in result
+
+    @pytest.mark.asyncio
+    async def test_source_detail_page(self, temp_config_file):
+        """Test !source N for a page result."""
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+        from matrix_llmagent.main import _capture_cli_source_command
+
+        agent = MatrixLLMAgent(temp_config_file)
+        arc = "cli#test"
+
+        # Pre-populate KB cache
+        agent.kb_cache = KnowledgeBaseResultsCache()
+        agent.kb_cache.store(
+            arc,
+            pages=[
+                {
+                    "page_title": "QGIS Project",
+                    "url": "https://wiki.osgeo.org/QGIS",
+                    "resume": "QGIS is a professional GIS application.",
+                    "keywords": "desktop GIS, open source",
+                }
+            ],
+            entities=[],
+        )
+
+        # Test !source 1 (view page)
+        result = await _capture_cli_source_command(agent, "view", 1, arc)
+
+        assert "[1] QGIS Project" in result
+        assert "QGIS is a professional GIS application" in result
+        assert "URL:" in result
+        assert "https://wiki.osgeo.org/QGIS" in result
+
+    @pytest.mark.asyncio
+    async def test_source_detail_entity(self, temp_config_file):
+        """Test !source N for an entity result."""
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+        from matrix_llmagent.main import _capture_cli_source_command
+
+        agent = MatrixLLMAgent(temp_config_file)
+        arc = "cli#test"
+
+        # Pre-populate KB cache with 1 page + 1 entity
+        agent.kb_cache = KnowledgeBaseResultsCache()
+        agent.kb_cache.store(
+            arc,
+            pages=[{"page_title": "Page 1", "url": "https://example.com", "resume": "Summary"}],
+            entities=[
+                {
+                    "entity_name": "Jeff McKenna",
+                    "entity_type": "Person",
+                    "url": "https://wiki.osgeo.org/JeffMcKenna",
+                }
+            ],
+        )
+
+        # Test !source 2 (entity is index 2 after the page)
+        result = await _capture_cli_source_command(agent, "view", 2, arc)
+
+        assert "[2] Jeff McKenna (Person)" in result
+        assert "https://wiki.osgeo.org/JeffMcKenna" in result
+
+    @pytest.mark.asyncio
+    async def test_source_invalid_index(self, temp_config_file):
+        """Test !source N with invalid index."""
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+        from matrix_llmagent.main import _capture_cli_source_command
+
+        agent = MatrixLLMAgent(temp_config_file)
+        arc = "cli#test"
+
+        # Pre-populate KB cache with 1 item
+        agent.kb_cache = KnowledgeBaseResultsCache()
+        agent.kb_cache.store(
+            arc,
+            pages=[{"page_title": "Only Page", "url": "", "resume": ""}],
+            entities=[],
+        )
+
+        # Test invalid index
+        result = await _capture_cli_source_command(agent, "view", 5, arc)
+
+        assert "Invalid source number" in result
+
+    @pytest.mark.asyncio
+    async def test_sources_library_vs_kb_priority(self, temp_config_file):
+        """Test that most recent cache is used when both have results."""
+        import time
+
+        from matrix_llmagent.agentic_actor.library_tool import LibraryResultsCache
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+        from matrix_llmagent.main import _capture_cli_source_command
+
+        agent = MatrixLLMAgent(temp_config_file)
+        arc = "cli#test"
+
+        # Populate KB cache first
+        agent.kb_cache = KnowledgeBaseResultsCache()
+        agent.kb_cache.store(
+            arc,
+            pages=[{"page_title": "KB Page", "url": "", "resume": "From KB"}],
+            entities=[],
+        )
+
+        # Wait a bit then populate library cache
+        time.sleep(0.1)
+
+        agent.library_cache = LibraryResultsCache()
+        agent.library_cache.store(
+            arc,
+            [
+                {
+                    "document_title": "Library Doc",
+                    "page_number": 1,
+                    "content": "From Library",
+                    "document_slug": "lib-doc",
+                }
+            ],
+        )
+
+        # Library is more recent, should be used
+        result = await _capture_cli_source_command(agent, "list", None, arc)
+
+        assert "Sources from last search:" in result  # Library format
+        assert "Library Doc" in result
+
+    @pytest.mark.asyncio
+    async def test_sources_kb_more_recent(self, temp_config_file):
+        """Test that KB cache is used when it's more recent."""
+        import time
+
+        from matrix_llmagent.agentic_actor.library_tool import LibraryResultsCache
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+        from matrix_llmagent.main import _capture_cli_source_command
+
+        agent = MatrixLLMAgent(temp_config_file)
+        arc = "cli#test"
+
+        # Populate library cache first
+        agent.library_cache = LibraryResultsCache()
+        agent.library_cache.store(
+            arc,
+            [{"document_title": "Old Library Doc", "page_number": 1, "content": "Old"}],
+        )
+
+        # Wait a bit then populate KB cache
+        time.sleep(0.1)
+
+        agent.kb_cache = KnowledgeBaseResultsCache()
+        agent.kb_cache.store(
+            arc,
+            pages=[{"page_title": "New KB Page", "url": "", "resume": "New from KB"}],
+            entities=[],
+        )
+
+        # KB is more recent, should be used
+        result = await _capture_cli_source_command(agent, "list", None, arc)
+
+        assert "Sources from last search (Wiki)" in result  # KB format
+        assert "New KB Page" in result

@@ -1,0 +1,45 @@
+{
+  "_comment": "INTEGRATION TEST - Compares !source N behavior between KB and Library",
+  "description": "Test !source N detail display in both KB and Library contexts",
+  "timeout_seconds": 300,
+  "mode": "agent",
+  "steps": [
+    {
+      "input": "Search the wiki for GeoServer",
+      "expect_not_contains": ["Error", "error", "Connection error"],
+      "expect_contains": []
+    },
+    {
+      "input": "!sources",
+      "expect_contains": ["Sources from last search (Wiki)"],
+      "expect_not_contains": ["No sources available"]
+    },
+    {
+      "input": "!source 1",
+      "_comment": "KB context: shows full abstract + URL",
+      "expect_contains": ["URL:"],
+      "expect_not_contains": ["image would be displayed", "Invalid source number"]
+    },
+    {
+      "input": "!source 2",
+      "expect_contains": ["URL:"],
+      "expect_not_contains": ["Invalid source number"]
+    },
+    {
+      "input": "Now search the library for mapping",
+      "expect_not_contains": ["Error", "error", "Connection error"],
+      "expect_contains": []
+    },
+    {
+      "input": "!sources",
+      "expect_contains": ["Sources from last search:"],
+      "expect_not_contains": ["Sources from last search (Wiki)"]
+    },
+    {
+      "input": "!source 1",
+      "_comment": "Library context: shows doc title + page + image placeholder",
+      "expect_contains": ["image would be displayed"],
+      "expect_not_contains": ["URL:", "Invalid source number"]
+    }
+  ]
+}

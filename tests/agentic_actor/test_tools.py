@@ -887,3 +887,251 @@ class TestLocalWebpageVisitorIntegration:
                 or "failed" in str(e).lower()
                 or "cannot" in str(e).lower()
             )
+
+
+class TestKnowledgeBaseResultsCache:
+    """Test KnowledgeBaseResultsCache functionality."""
+
+    def test_store_and_get(self):
+        """Test storing and retrieving results."""
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+
+        cache = KnowledgeBaseResultsCache(ttl_hours=24, max_rooms=100)
+
+        pages = [
+            {"page_title": "Test Page", "url": "https://example.com/test", "resume": "Test summary"}
+        ]
+        entities = [{"entity_name": "TestEntity", "entity_type": "Organization", "url": None}]
+
+        cache.store("arc#test", pages, entities)
+
+        result = cache.get("arc#test")
+        assert result is not None
+        assert len(result.pages) == 1
+        assert len(result.entities) == 1
+        assert result.pages[0]["page_title"] == "Test Page"
+        assert result.entities[0]["entity_name"] == "TestEntity"
+
+    def test_get_nonexistent(self):
+        """Test getting non-existent results returns None."""
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+
+        cache = KnowledgeBaseResultsCache()
+        result = cache.get("nonexistent#arc")
+        assert result is None
+
+    def test_get_timestamp(self):
+        """Test get_timestamp returns correct value."""
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+
+        cache = KnowledgeBaseResultsCache()
+        cache.store("arc#test", [], [])
+
+        timestamp = cache.get_timestamp("arc#test")
+        assert timestamp > 0
+
+        # Non-existent arc returns 0
+        assert cache.get_timestamp("nonexistent") == 0.0
+
+    def test_clear(self):
+        """Test clearing cached results."""
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+
+        cache = KnowledgeBaseResultsCache()
+        cache.store("arc#test", [{"page_title": "Test"}], [])
+
+        assert cache.get("arc#test") is not None
+        cache.clear("arc#test")
+        assert cache.get("arc#test") is None
+
+    def test_ttl_expiration(self):
+        """Test TTL expiration."""
+        import time
+
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+
+        # Very short TTL for testing
+        cache = KnowledgeBaseResultsCache(ttl_hours=0.0001)  # ~0.36 seconds
+        cache.store("arc#test", [{"page_title": "Test"}], [])
+
+        # Should exist immediately
+        assert cache.get("arc#test") is not None
+
+        # Wait for expiration
+        time.sleep(0.5)
+        assert cache.get("arc#test") is None
+
+    def test_lru_eviction(self):
+        """Test LRU eviction when at capacity."""
+        import time
+
+        from matrix_llmagent.agentic_actor.tools import KnowledgeBaseResultsCache
+
+        cache = KnowledgeBaseResultsCache(max_rooms=2)
+
+        cache.store("arc#1", [{"page_title": "Page 1"}], [])
+        time.sleep(0.01)
+        cache.store("arc#2", [{"page_title": "Page 2"}], [])
+        time.sleep(0.01)
+
+        # Both should exist
+        assert cache.get("arc#1") is not None
+        assert cache.get("arc#2") is not None
+
+        # Add a third - should evict the oldest (arc#1)
+        cache.store("arc#3", [{"page_title": "Page 3"}], [])
+
+        assert cache.get("arc#1") is None  # Evicted
+        assert cache.get("arc#2") is not None
+        assert cache.get("arc#3") is not None
+
+
+class TestKBSourcesFormatting:
+    """Test KB sources formatting functions."""
+
+    def test_format_kb_sources_list_with_pages(self):
+        """Test formatting sources list with pages."""
+        from matrix_llmagent.agentic_actor.tools import KBCachedResults, format_kb_sources_list
+
+        results = KBCachedResults(
+            pages=[
+                {
+                    "page_title": "GeoServer Documentation",
+                    "url": "https://wiki.osgeo.org/GeoServer",
+                    "resume": "GeoServer is an open source server for sharing geospatial data.",
+                }
+            ],
+            entities=[],
+            timestamp=0,
+        )
+
+        output = format_kb_sources_list(results)
+
+        assert "Sources from last search (Wiki)" in output
+        assert "[1] GeoServer Documentation" in output
+        assert "GeoServer is an open source" in output
+        assert "https://wiki.osgeo.org/GeoServer" in output
+        assert "!source N" in output
+
+    def test_format_kb_sources_list_with_entities(self):
+        """Test formatting sources list with entities."""
+        from matrix_llmagent.agentic_actor.tools import KBCachedResults, format_kb_sources_list
+
+        results = KBCachedResults(
+            pages=[],
+            entities=[
+                {
+                    "entity_name": "OSGeo Foundation",
+                    "entity_type": "Organization",
+                    "url": "https://wiki.osgeo.org/OSGeo",
+                }
+            ],
+            timestamp=0,
+        )
+
+        output = format_kb_sources_list(results)
+
+        assert "[1] OSGeo Foundation (Organization)" in output
+        assert "https://wiki.osgeo.org/OSGeo" in output
+
+    def test_format_kb_sources_list_mixed(self):
+        """Test formatting sources list with both pages and entities."""
+        from matrix_llmagent.agentic_actor.tools import KBCachedResults, format_kb_sources_list
+
+        results = KBCachedResults(
+            pages=[
+                {
+                    "page_title": "Page One",
+                    "url": "https://example.com/1",
+                    "resume": "First page summary",
+                }
+            ],
+            entities=[
+                {
+                    "entity_name": "Entity One",
+                    "entity_type": "Person",
+                    "url": "https://example.com/e1",
+                }
+            ],
+            timestamp=0,
+        )
+
+        output = format_kb_sources_list(results)
+
+        # Pages come first
+        assert "[1] Page One" in output
+        # Then entities
+        assert "[2] Entity One (Person)" in output
+
+    def test_format_kb_sources_list_empty(self):
+        """Test formatting empty sources list."""
+        from matrix_llmagent.agentic_actor.tools import KBCachedResults, format_kb_sources_list
+
+        results = KBCachedResults(pages=[], entities=[], timestamp=0)
+        output = format_kb_sources_list(results)
+
+        assert "No sources available" in output
+
+    def test_format_kb_source_detail_page(self):
+        """Test formatting detailed view of a page source."""
+        from matrix_llmagent.agentic_actor.tools import KBCachedResults, format_kb_source_detail
+
+        results = KBCachedResults(
+            pages=[
+                {
+                    "page_title": "QGIS Project",
+                    "url": "https://wiki.osgeo.org/QGIS",
+                    "resume": "QGIS is a professional GIS application that is built on top of and proud to be itself Free and Open Source Software (FOSS).",
+                    "keywords": "GIS, mapping, open source",
+                }
+            ],
+            entities=[],
+            timestamp=0,
+        )
+
+        output = format_kb_source_detail(results, 1)
+
+        assert "[1] QGIS Project" in output
+        assert "QGIS is a professional GIS application" in output
+        assert "GIS, mapping, open source" in output
+        assert "https://wiki.osgeo.org/QGIS" in output
+
+    def test_format_kb_source_detail_entity(self):
+        """Test formatting detailed view of an entity source."""
+        from matrix_llmagent.agentic_actor.tools import KBCachedResults, format_kb_source_detail
+
+        results = KBCachedResults(
+            pages=[{"page_title": "Page", "url": "https://example.com", "resume": "Summary"}],
+            entities=[
+                {
+                    "entity_name": "Jeff McKenna",
+                    "entity_type": "Person",
+                    "url": "https://wiki.osgeo.org/JeffMcKenna",
+                }
+            ],
+            timestamp=0,
+        )
+
+        # Entity is at index 2 (page is at index 1)
+        output = format_kb_source_detail(results, 2)
+
+        assert "[2] Jeff McKenna (Person)" in output
+        assert "https://wiki.osgeo.org/JeffMcKenna" in output
+
+    def test_format_kb_source_detail_invalid_index(self):
+        """Test formatting with invalid index."""
+        from matrix_llmagent.agentic_actor.tools import KBCachedResults, format_kb_source_detail
+
+        results = KBCachedResults(
+            pages=[{"page_title": "Page", "url": "", "resume": ""}],
+            entities=[],
+            timestamp=0,
+        )
+
+        # Index 0 is invalid (1-based)
+        output = format_kb_source_detail(results, 0)
+        assert "Invalid source number" in output
+
+        # Index 5 is out of range
+        output = format_kb_source_detail(results, 5)
+        assert "Invalid source number" in output

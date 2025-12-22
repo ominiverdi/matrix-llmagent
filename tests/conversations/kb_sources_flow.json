@@ -1,0 +1,28 @@
+{
+  "_comment": "INTEGRATION TEST - Requires running LLM server (llamacpp on port 8080)",
+  "description": "Test !sources flow with knowledge base search (requires LLM)",
+  "timeout_seconds": 300,
+  "mode": "agent",
+  "steps": [
+    {
+      "input": "!sources",
+      "expect_contains": ["No sources available"],
+      "expect_not_contains": ["Error"]
+    },
+    {
+      "input": "What is GeoServer according to the wiki?",
+      "expect_not_contains": ["Error", "error", "failed", "Connection error"],
+      "expect_contains": []
+    },
+    {
+      "input": "!sources",
+      "expect_contains": ["Sources from last search"],
+      "expect_not_contains": ["No sources available"]
+    },
+    {
+      "input": "!source 1",
+      "expect_contains": ["URL:"],
+      "expect_not_contains": ["Invalid source number"]
+    }
+  ]
+}

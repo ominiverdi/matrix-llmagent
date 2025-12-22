@@ -10,9 +10,15 @@ from .agentic_actor.library_tool import (
     LibraryResultsCache,
     fetch_library_image,
     fetch_library_page,
+    format_sources_list,
     get_best_image_path,
     get_citation_tag,
     search_library_direct,
+)
+from .agentic_actor.tools import (
+    KBCachedResults,
+    format_kb_source_detail,
+    format_kb_sources_list,
 )
 from .matrix_client import MatrixClient
 from .rate_limiter import RateLimiter
@@ -866,32 +872,66 @@ Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY
         """Handle source viewing commands (!sources, !source N).
 
         The 'golden cord' - lets users see sources from last search and
-        view the actual source pages.
+        view the actual source pages. Supports both library and knowledge base sources.
 
         Args:
             room_id: Matrix room ID
             command: 'list' or 'view'
             index: Source index for 'view', None for 'list'
         """
-        from matrix_llmagent.agentic_actor.library_tool import format_sources_list
-
-        lib_config = self.config.get("tools", {}).get("library", {})
-        if not lib_config.get("enabled") or not lib_config.get("base_url"):
-            await self.client.send_message(room_id, "Library is not configured.")
-            return
-
-        cache = getattr(self.agent, "library_cache", None)
-        if cache is None:
-            await self.client.send_message(
-                room_id, "No sources available. Run a library search first."
-            )
-            return
-
         arc = f"matrix#{room_id}"
+
+        # Get both caches
+        lib_cache = getattr(self.agent, "library_cache", None)
+        kb_cache = getattr(self.agent, "kb_cache", None)
+
+        # Get results and timestamps from each cache
+        lib_results = lib_cache.get(arc) if lib_cache else None
+        kb_results = kb_cache.get(arc) if kb_cache else None
+
+        lib_timestamp = lib_cache.get_timestamp(arc) if lib_cache else 0.0
+        kb_timestamp = kb_cache.get_timestamp(arc) if kb_cache else 0.0
+
+        # Determine which source to use based on most recent timestamp
+        use_library = False
+        use_kb = False
+
+        if lib_results and kb_results:
+            # Both have results, use the most recent
+            if lib_timestamp >= kb_timestamp:
+                use_library = True
+            else:
+                use_kb = True
+        elif lib_results:
+            use_library = True
+        elif kb_results:
+            use_kb = True
+
+        if not use_library and not use_kb:
+            await self.client.send_message(room_id, "No sources available. Run a search first.")
+            return
+
+        # Handle library sources
+        if use_library:
+            assert lib_cache is not None  # Guaranteed by use_library check
+            await self._handle_library_source_command(room_id, command, index, lib_cache, arc)
+        # Handle knowledge base sources
+        else:
+            assert kb_results is not None  # Guaranteed by use_kb check
+            await self._handle_kb_source_command(room_id, command, index, kb_results)
+
+    async def _handle_library_source_command(
+        self,
+        room_id: str,
+        command: str,
+        index: int | None,
+        cache: LibraryResultsCache,
+        arc: str,
+    ) -> None:
+        """Handle source commands for library results."""
         results = cache.get(arc)
 
         if command == "list":
-            # Show all sources from last search
             if not results:
                 await self.client.send_message(
                     room_id, "No sources available. Run a library search first."
@@ -926,7 +966,12 @@ Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY
             return
 
         # Fetch the page
-        base_url = lib_config["base_url"]
+        lib_config = self.config.get("tools", {}).get("library", {})
+        base_url = lib_config.get("base_url")
+        if not base_url:
+            await self.client.send_message(room_id, "Library is not configured.")
+            return
+
         await self.client.send_message(room_id, f"Fetching p.{page_num} of '{doc_title}'...")
 
         page_result = await fetch_library_page(base_url, doc_slug, page_num)
@@ -953,6 +998,31 @@ Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY
             f"page_{page_result.page_number}.png",
             page_result.image_mimetype,
         )
+
+    async def _handle_kb_source_command(
+        self,
+        room_id: str,
+        command: str,
+        index: int | None,
+        results: KBCachedResults,
+    ) -> None:
+        """Handle source commands for knowledge base results."""
+        kb_results = results
+
+        if command == "list":
+            sources_text = format_kb_sources_list(kb_results)
+            await self.client.send_message(room_id, sources_text)
+            return
+
+        # command == "view" - show full details for the source
+        total_items = len(kb_results.pages) + len(kb_results.entities)
+
+        if index is None or index < 1 or index > total_items:
+            await self.client.send_message(room_id, f"Invalid source number. Use 1-{total_items}.")
+            return
+
+        detail_text = format_kb_source_detail(kb_results, index)
+        await self.client.send_message(room_id, detail_text)
 
     async def _handle_library_search(self, room_id: str, query: str) -> None:
         """Handle !l library search command (direct, no LLM).

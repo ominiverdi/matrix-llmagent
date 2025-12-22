@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
@@ -230,6 +231,180 @@ TOOLS: list[Tool] = [
 
 # Add chronicle tools to the main tools list
 TOOLS.extend(chronicle_tools_defs())  # type: ignore
+
+
+# --- Knowledge Base Results Cache ---
+
+
+@dataclass
+class KBCachedResults:
+    """Cached knowledge base search results."""
+
+    pages: list[dict]  # page_title, url, resume, keywords
+    entities: list[dict]  # entity_name, entity_type, url
+    timestamp: float
+
+
+class KnowledgeBaseResultsCache:
+    """Per-room cache for knowledge base search results with TTL and LRU eviction."""
+
+    def __init__(self, ttl_hours: float = 24, max_rooms: int = 100):
+        """Initialize cache.
+
+        Args:
+            ttl_hours: Time-to-live in hours for cached results.
+            max_rooms: Maximum number of rooms to cache before LRU eviction.
+        """
+        self.ttl_seconds = ttl_hours * 3600
+        self.max_rooms = max_rooms
+        self._cache: dict[str, KBCachedResults] = {}
+
+    def store(self, arc: str, pages: list[dict], entities: list[dict]) -> None:
+        """Store search results for an arc (room/cli context)."""
+        # Evict oldest if at capacity and this is a new arc
+        if arc not in self._cache and len(self._cache) >= self.max_rooms:
+            self._evict_oldest()
+
+        self._cache[arc] = KBCachedResults(pages=pages, entities=entities, timestamp=time.time())
+        logger.debug(f"Cached {len(pages)} pages and {len(entities)} entities for arc {arc}")
+
+    def get(self, arc: str) -> KBCachedResults | None:
+        """Get cached results for an arc. Returns None if not found or expired."""
+        entry = self._cache.get(arc)
+        if entry is None:
+            return None
+
+        if self._is_expired(entry):
+            del self._cache[arc]
+            logger.debug(f"KB cache expired for arc {arc}")
+            return None
+
+        return entry
+
+    def get_timestamp(self, arc: str) -> float:
+        """Get the timestamp of cached results for an arc. Returns 0 if not found."""
+        entry = self._cache.get(arc)
+        if entry is None or self._is_expired(entry):
+            return 0.0
+        return entry.timestamp
+
+    def clear(self, arc: str) -> None:
+        """Clear cached results for an arc."""
+        if arc in self._cache:
+            del self._cache[arc]
+
+    def _evict_oldest(self) -> None:
+        """Evict the oldest cache entry (LRU)."""
+        if not self._cache:
+            return
+
+        oldest_arc = min(self._cache.keys(), key=lambda k: self._cache[k].timestamp)
+        del self._cache[oldest_arc]
+        logger.debug(f"Evicted oldest KB cache entry for arc {oldest_arc}")
+
+    def _is_expired(self, entry: KBCachedResults) -> bool:
+        """Check if a cache entry has expired."""
+        return time.time() - entry.timestamp > self.ttl_seconds
+
+
+def format_kb_sources_list(results: KBCachedResults) -> str:
+    """Format cached KB search results as a sources list.
+
+    Shows pages and entities with short snippets, allowing users to
+    view full details with !source N.
+
+    Args:
+        results: Cached search results from knowledge base search.
+
+    Returns:
+        Formatted string with numbered sources for !source N command.
+    """
+    if not results.pages and not results.entities:
+        return "No sources available. Run a knowledge base search first."
+
+    lines = ["**Sources from last search (Wiki):**", ""]
+    index = 1
+
+    # Pages first
+    for page in results.pages:
+        title = page.get("page_title", "Unknown")
+        url = page.get("url", "")
+        resume = page.get("resume", "").replace("\n", " ").strip()
+
+        # Short snippet for list view
+        snippet = resume[:80] + "..." if len(resume) > 80 else resume
+
+        lines.append(f'  [{index}] {title} - "{snippet}"')
+        if url:
+            lines.append(f"      {url}")
+        index += 1
+
+    # Then entities
+    for entity in results.entities:
+        name = entity.get("entity_name", "Unknown")
+        ent_type = entity.get("entity_type", "")
+        url = entity.get("url", "")
+
+        type_suffix = f" ({ent_type})" if ent_type else ""
+        lines.append(f"  [{index}] {name}{type_suffix}")
+        if url:
+            lines.append(f"      {url}")
+        index += 1
+
+    lines.append("")
+    lines.append("View full details: `!source N`")
+
+    return "\n".join(lines)
+
+
+def format_kb_source_detail(results: KBCachedResults, index: int) -> str:
+    """Format a single KB result with full details for !source N.
+
+    Args:
+        results: Cached search results.
+        index: 1-based index of the source to display.
+
+    Returns:
+        Formatted string with full abstract and URL.
+    """
+    total_items = len(results.pages) + len(results.entities)
+
+    if index < 1 or index > total_items:
+        return f"Invalid source number. Use 1-{total_items}."
+
+    # Determine if this is a page or entity
+    if index <= len(results.pages):
+        page = results.pages[index - 1]
+        title = page.get("page_title", "Unknown")
+        url = page.get("url", "")
+        resume = page.get("resume", "").strip()
+        keywords = page.get("keywords", "")
+
+        lines = [f"**[{index}] {title}**", ""]
+        if resume:
+            lines.append(resume)
+            lines.append("")
+        if keywords:
+            lines.append(f"**Keywords:** {keywords}")
+            lines.append("")
+        if url:
+            lines.append(f"**URL:** {url}")
+
+        return "\n".join(lines)
+    else:
+        # Entity
+        entity_index = index - len(results.pages) - 1
+        entity = results.entities[entity_index]
+        name = entity.get("entity_name", "Unknown")
+        ent_type = entity.get("entity_type", "")
+        url = entity.get("url", "")
+
+        type_suffix = f" ({ent_type})" if ent_type else ""
+        lines = [f"**[{index}] {name}{type_suffix}**", ""]
+        if url:
+            lines.append(f"**URL:** {url}")
+
+        return "\n".join(lines)
 
 
 def knowledge_base_tool_def(name: str, description: str) -> Tool:
@@ -1325,11 +1500,15 @@ class KnowledgeBaseSearchExecutor:
     def __init__(
         self,
         database_url: str,
+        cache: KnowledgeBaseResultsCache | None = None,
+        arc: str = "",
         name: str = "Knowledge Base",
         max_results: int = 5,
         max_entities: int = 10,
     ):
         self.database_url = database_url
+        self.cache = cache
+        self.arc = arc
         self.name = name
         self.max_results = max_results
         self.max_entities = max_entities
@@ -1544,6 +1723,13 @@ class KnowledgeBaseSearchExecutor:
 
         if not results_parts:
             return f"No results found in {self.name} for: {query}"
+
+        # Cache results for !sources command
+        if self.cache and self.arc and (pages or entities):
+            # Convert asyncpg Records to dicts for caching
+            pages_dicts = [dict(p) for p in pages] if pages else []
+            entities_dicts = [dict(e) for e in entities] if entities else []
+            self.cache.store(self.arc, pages_dicts, entities_dicts)
 
         logger.info(
             f"Knowledge base search '{effective_query}': {len(pages)} pages, {len(entities)} entities"
@@ -1870,6 +2056,7 @@ def create_tool_executors(
     arc: str,
     router: Any = None,
     library_cache: LibraryResultsCache | None = None,
+    kb_cache: KnowledgeBaseResultsCache | None = None,
 ) -> dict[str, Any]:
     """Create tool executors with configuration."""
     # Tool configs
@@ -1974,8 +2161,18 @@ def create_tool_executors(
     # Add knowledge_base if configured
     kb_config = tools.get("knowledge_base", {})
     if kb_config.get("enabled") and kb_config.get("database_url"):
+        # Use provided cache or create a new one (prefer agent's shared cache)
+        cache = kb_cache
+        if cache is None:
+            cache_config = kb_config.get("cache", {})
+            cache = KnowledgeBaseResultsCache(
+                ttl_hours=cache_config.get("ttl_hours", 24),
+                max_rooms=cache_config.get("max_rooms", 100),
+            )
         executors["knowledge_base"] = KnowledgeBaseSearchExecutor(
             database_url=kb_config["database_url"],
+            cache=cache,
+            arc=arc,  # Pass arc for caching results per-room
             name=kb_config.get("name", "Knowledge Base"),
             max_results=kb_config.get("max_results", 5),
             max_entities=kb_config.get("max_entities", 10),

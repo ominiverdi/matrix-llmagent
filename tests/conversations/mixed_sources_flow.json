@@ -1,0 +1,49 @@
+{
+  "_comment": "INTEGRATION TEST - Requires LLM server AND osgeo-library server",
+  "_notes": "Library search for GeoServer returns 4 results (mentions in Digital Earth doc)",
+  "description": "Test !sources with both library and KB searches (no collision)",
+  "timeout_seconds": 300,
+  "mode": "agent",
+  "steps": [
+    {
+      "input": "!sources",
+      "expect_contains": ["No sources available"],
+      "expect_not_contains": ["Error"]
+    },
+    {
+      "input": "Search the wiki for QGIS",
+      "expect_not_contains": ["Error", "error", "Connection error"],
+      "expect_contains": []
+    },
+    {
+      "input": "!sources",
+      "expect_contains": ["Sources from last search (Wiki)", "QGIS"],
+      "expect_not_contains": ["No sources available"]
+    },
+    {
+      "input": "Now search the library for GeoServer",
+      "expect_not_contains": ["Error", "error", "Connection error"],
+      "expect_contains": []
+    },
+    {
+      "input": "!sources",
+      "expect_contains": ["Sources from last search:"],
+      "expect_not_contains": ["Sources from last search (Wiki)"]
+    },
+    {
+      "input": "!source 1",
+      "expect_contains": [],
+      "expect_not_contains": ["No sources available", "Invalid source number"]
+    },
+    {
+      "input": "Search the wiki for MapServer",
+      "expect_not_contains": ["Error", "error", "Connection error"],
+      "expect_contains": []
+    },
+    {
+      "input": "!sources",
+      "expect_contains": ["Sources from last search (Wiki)", "MapServer"],
+      "expect_not_contains": ["No sources available"]
+    }
+  ]
+}
