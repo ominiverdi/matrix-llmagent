@@ -3,9 +3,20 @@
 import io
 import logging
 import os
+from collections.abc import Callable
 from typing import Any
 
-from nio import AsyncClient, AsyncClientConfig
+from nio import (
+    AsyncClient,
+    AsyncClientConfig,
+    KeyVerificationCancel,
+    KeyVerificationEvent,
+    KeyVerificationKey,
+    KeyVerificationMac,
+    KeyVerificationStart,
+    LocalProtocolError,
+    ToDeviceError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -301,3 +312,111 @@ class MatrixClient:
             if not self.client.olm.is_device_verified(device):
                 self.client.verify_device(device)
                 logger.info(f"Trusted device {device_id} for user {user_id}")
+
+    def get_device_fingerprint(self) -> str | None:
+        """Get this device's Ed25519 fingerprint for manual verification.
+
+        Returns:
+            Fingerprint string formatted for display, or None if E2EE not enabled
+        """
+        if not self._encryption_enabled or self.client.olm is None:
+            return None
+
+        # Get the Ed25519 fingerprint key
+        fingerprint = self.client.olm.account.identity_keys["ed25519"]
+
+        # Format it nicely with spaces every 4 characters for readability
+        formatted = " ".join(fingerprint[i : i + 4] for i in range(0, len(fingerprint), 4))
+        return formatted
+
+    def log_device_info(self) -> None:
+        """Log device info including fingerprint for manual verification."""
+        if not self._encryption_enabled:
+            logger.info("E2EE is disabled")
+            return
+
+        logger.info(f"Device ID: {self.device_id}")
+
+        fingerprint = self.get_device_fingerprint()
+        if fingerprint:
+            logger.info(f"Device fingerprint (Ed25519): {fingerprint}")
+            logger.info(
+                "To verify this bot, check this fingerprint matches in Element: "
+                "Settings > Security & Privacy > [this device] > Session key"
+            )
+
+    def add_to_device_callback(self, callback: Callable, event_type: type) -> None:
+        """Add a callback for to-device events (used for key verification).
+
+        Args:
+            callback: Async function to call when event occurs
+            event_type: Event type to listen for (e.g., KeyVerificationEvent)
+        """
+        self.client.add_to_device_callback(callback, event_type)
+        logger.debug(f"Added to-device callback for {event_type}")
+
+    async def handle_key_verification_event(self, event: KeyVerificationEvent) -> None:
+        """Handle incoming key verification events.
+
+        This allows users to verify the bot via emoji verification.
+        The bot automatically accepts and processes verification requests.
+
+        Args:
+            event: Key verification event from another device
+        """
+        if isinstance(event, KeyVerificationStart):
+            # Incoming verification request
+            if "emoji" not in event.short_authentication_string:
+                logger.warning(f"Verification from {event.sender} doesn't support emoji, ignoring")
+                return
+
+            logger.info(f"Accepting verification request from {event.sender}")
+
+            # Accept the verification request
+            resp = await self.client.accept_key_verification(event.transaction_id)
+            if isinstance(resp, ToDeviceError):
+                logger.error(f"Failed to accept verification: {resp}")
+                return
+
+            # Share our key
+            sas = self.client.key_verifications[event.transaction_id]
+            to_device_msg = sas.share_key()
+            resp = await self.client.to_device(to_device_msg)
+            if isinstance(resp, ToDeviceError):
+                logger.error(f"Failed to share key: {resp}")
+
+        elif isinstance(event, KeyVerificationCancel):
+            logger.info(f"Verification cancelled by {event.sender}: {event.reason}")
+
+        elif isinstance(event, KeyVerificationKey):
+            # We received their key, now show emojis
+            sas = self.client.key_verifications[event.transaction_id]
+            emojis = sas.get_emoji()
+
+            # Log the emojis for the operator to see
+            emoji_str = " ".join(f"{e[0]}({e[1]})" for e in emojis)
+            logger.info(f"Verification emojis from {event.sender}: {emoji_str}")
+
+            # Auto-confirm (bot trusts the user initiating verification)
+            # In a more paranoid setup, you might want manual confirmation
+            logger.info("Auto-confirming verification (bot auto-trust mode)")
+            resp = await self.client.confirm_short_auth_string(event.transaction_id)
+            if isinstance(resp, ToDeviceError):
+                logger.error(f"Failed to confirm verification: {resp}")
+
+        elif isinstance(event, KeyVerificationMac):
+            # Final step - verification complete
+            sas = self.client.key_verifications[event.transaction_id]
+            try:
+                to_device_msg = sas.get_mac()
+            except LocalProtocolError as e:
+                logger.error(f"Verification protocol error: {e}")
+                return
+
+            resp = await self.client.to_device(to_device_msg)
+            if isinstance(resp, ToDeviceError):
+                logger.error(f"Failed to send MAC: {resp}")
+                return
+
+            logger.info(f"Verification complete! Verified devices: {sas.verified_devices}")
+            logger.info(f"User {event.sender} can now send encrypted messages to me")

@@ -1,34 +1,68 @@
 # End-to-End Encryption (E2EE) Support
 
-## Current Status: Partial Implementation
+## Current Status: Full Implementation with Device Verification
 
-E2EE support has been partially implemented but **does not reliably work** due to a fundamental Matrix protocol issue: clients like Element do not always share Megolm session keys with new/unverified devices.
+E2EE support is implemented with emoji verification. For E2EE to work reliably, users must **verify the bot's device** before sending encrypted messages.
 
 ### What's Implemented
 
 - Crypto store creation and persistence (`./nio_store/`)
 - Device key generation and upload
 - Automatic key query/claim after sync
+- **Device fingerprint display on startup** for manual verification
+- **Emoji verification support** - bot automatically accepts and processes verification requests
 - `ignore_unverified_devices=True` for sending messages
 - Graceful degradation (error message when decryption fails)
 - `matrix-invites` CLI tool for managing encrypted room invitations
 
-### What Doesn't Work
+## How to Use E2EE with the Bot
 
-**Decryption of incoming messages fails** because:
+### Step 1: Note the Bot's Device Fingerprint
 
-1. When a user sends an encrypted message, their client (e.g., Element) creates a Megolm session
-2. Element shares the Megolm session keys only with devices it knows about at that moment
-3. Even though the bot's device keys are uploaded, Element often doesn't include the bot's device in the key sharing
-4. The bot receives `MegolmEvent` but cannot decrypt it ("no session found")
+When the bot starts, it logs its device fingerprint:
 
-This is a known Matrix ecosystem issue related to device list synchronization and key sharing timing.
+```
+Device ID: MATRIX_LLMAGENT
+Device fingerprint (Ed25519): jD1m e6gr WGFw ZrW9 f4mJ NqEP uFL+ ARQv JENu Dkuz aiA
+To verify this bot, check this fingerprint matches in Element...
+```
 
-## Workarounds
+### Step 2: Verify the Bot's Device (Required for E2EE)
 
-### Option 1: Use Unencrypted Rooms (Recommended)
+In Element (or your Matrix client):
 
-To chat privately with the bot without encryption issues:
+1. Go to **Settings > Security & Privacy > Cross-signing**
+2. Find the bot's user (e.g., `@bot:matrix.org`)
+3. Click on the bot's device (e.g., `MATRIX_LLMAGENT`)
+4. Choose **"Verify by emoji"** or **"Manually verify by text"**
+
+**For emoji verification:**
+- Element will send a verification request to the bot
+- The bot automatically accepts and confirms
+- Check the console log to see the emoji sequence
+- Confirm in Element if they match
+
+**For manual verification:**
+- Compare the fingerprint in Element with the one the bot logged at startup
+- If they match, click "Verify"
+
+### Step 3: Send Encrypted Messages
+
+After verification, Element will share Megolm session keys with the bot, and encrypted messages will work.
+
+## Why Verification is Required
+
+Matrix E2EE is designed so that clients only share encryption keys with **verified** or **known** devices. Without verification:
+
+1. Your client (Element) sees the bot's device as "unverified"
+2. When you send a message, Element may not share the Megolm keys with unverified devices
+3. The bot receives the encrypted message but cannot decrypt it
+
+Verification tells Element: "I trust this device, share keys with it."
+
+## Alternative: Unencrypted Rooms
+
+If you don't want to deal with verification, use unencrypted rooms:
 
 1. **Create a new room** (not "Start Direct Message")
    - In Element: Click "+" > "New Room"
@@ -42,26 +76,6 @@ To chat privately with the bot without encryption issues:
 
 4. **Start chatting** - the bot will respond normally
 
-### Option 2: Use the Invite Manager (Experimental)
-
-The `matrix-invites` tool can create encrypted DMs where the bot initiates:
-
-```bash
-uv run matrix-invites
-> dm @username:matrix.org
-```
-
-This creates an encrypted room and sends an initial greeting, attempting to establish the Megolm session first. However, subsequent messages from the user may still fail to decrypt due to Element creating new sessions.
-
-### Option 3: /discardsession (Unreliable)
-
-After the bot joins an encrypted room, the user can try:
-
-1. Type `/discardsession` in the chat
-2. Send a new message
-
-This forces Element to create a new Megolm session, but it may still not include the bot's device.
-
 ## Technical Details
 
 ### Why E2EE is Complex for Bots
@@ -74,8 +88,9 @@ Matrix E2EE uses Olm/Megolm protocols:
 | **Megolm** | Group encryption for room messages |
 | **Device keys** | Each device has identity keys uploaded to homeserver |
 | **Session keys** | Megolm session keys shared via Olm to authorized devices |
+| **Device verification** | Trust establishment so clients share keys |
 
-The problem: **Key sharing is sender-initiated**. When Alice sends a message, her client decides which devices get the Megolm session keys. If Alice's client doesn't have the bot's device in its device list (or doesn't trust it), the bot never gets the keys.
+The key insight: **Key sharing is sender-initiated and trust-based**. When you send a message, your client decides which devices get the Megolm session keys based on verification status.
 
 ### Implementation Details
 
@@ -89,8 +104,8 @@ pip install "matrix-nio[e2e]"
 ```
 
 **Key files:**
-- `matrix_llmagent/matrix_client.py` - E2EE client configuration, `load_store()`, key upload
-- `matrix_llmagent/matrix_monitor.py` - `MegolmEvent` handling
+- `matrix_llmagent/matrix_client.py` - E2EE client, fingerprint display, verification handler
+- `matrix_llmagent/matrix_monitor.py` - MegolmEvent handling, verification callback setup
 - `matrix_llmagent/invite_manager.py` - CLI for room management
 - `./nio_store/` - SQLite crypto store (device keys, sessions)
 
@@ -98,6 +113,7 @@ pip install "matrix-nio[e2e]"
 ```json
 {
   "matrix": {
+    "device_id": "MATRIX_LLMAGENT",
     "encryption": {
       "enabled": true,
       "store_path": "./nio_store/"
@@ -106,32 +122,46 @@ pip install "matrix-nio[e2e]"
 }
 ```
 
-### Known Limitations
+**Important:** Keep the same `device_id` across restarts. Changing it creates a new device identity, invalidating existing verifications.
 
-1. **No cross-signing support** - matrix-nio cannot verify via master signing key
-2. **No SSSS** - No server-side key backup integration
-3. **No key request handling** - Cannot request keys for missed messages
-4. **Device list sync issues** - Other clients may not see bot's device
-5. **Session key sharing** - Depends entirely on sender's client behavior
+### The Verification Flow
 
-## Future Options
+```
+User                          Bot                         Element
+  |                            |                            |
+  |  Start verification -----> |                            |
+  |                            | <-- Accept verification    |
+  |                            | --> Share key              |
+  | <-- Show emojis            |                            |
+  |                            | --> Auto-confirm emojis    |
+  | Confirm match -----------> |                            |
+  |                            | <-- Verification complete  |
+  |                            |                            |
+  | Send encrypted message --> |                            |
+  |                            | (has keys, can decrypt!)   |
+  | <-- Encrypted response --- |                            |
+```
 
-### Pantalaimon
+### Troubleshooting
 
-[Pantalaimon](https://github.com/matrix-org/pantalaimon) is an E2EE-aware proxy that sits between a client and homeserver. It handles all encryption/decryption, presenting unencrypted messages to the client. This could be a more reliable solution but adds deployment complexity.
+**"Unable to decrypt" after verification:**
+- Try `/discardsession` in the chat to force a new Megolm session
+- Make sure the bot wasn't restarted with a different `device_id`
+- Check that `./nio_store/` is persistent (not deleted between restarts)
 
-### Dehydrated Devices
+**Verification request not working:**
+- Ensure the bot is running and connected
+- Check the bot's console for verification events
+- Try manual verification instead of emoji
 
-A future Matrix feature that would allow "drying" a device so it can receive keys while offline. Not yet widely implemented.
-
-### Wait for Matrix Improvements
-
-The Matrix protocol is actively being improved. Future versions may have better key sharing mechanisms.
+**Bot shows as "unverified" after restart:**
+- The `device_id` must be the same across restarts
+- The `./nio_store/` directory must persist
+- If you lose the store, you need to re-verify
 
 ## References
 
+- [matrix-nio E2EE examples](https://matrix-nio.readthedocs.io/en/latest/examples.html)
+- [Matrix E2EE implementation guide](https://matrix.org/docs/matrix-concepts/end-to-end-encryption/)
 - [Fix Decryption Error Guide](https://joinmatrix.org/guide/fix-decryption-error/)
-- [Unable to Decrypt Explained](https://blog.neko.dev/posts/unable-to-decrypt-matrix.html)
-- [matrix-nio E2EE documentation](https://matrix-nio.readthedocs.io/en/latest/examples.html)
-- [Pantalaimon](https://github.com/matrix-org/pantalaimon)
-- [Matrix E2EE Spec](https://matrix.org/docs/matrix-concepts/end-to-end-encryption/)
+- [The UISI Bug](https://github.com/element-hq/element-web/issues/2996) - detailed explanation of decryption issues

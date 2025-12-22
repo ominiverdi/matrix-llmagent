@@ -4,7 +4,7 @@ import html
 import logging
 import re
 
-from nio import MatrixRoom, MegolmEvent, RoomMessageText
+from nio import KeyVerificationEvent, MatrixRoom, MegolmEvent, RoomMessageText
 
 from .agentic_actor.library_tool import (
     LibraryResultsCache,
@@ -231,6 +231,9 @@ class MatrixMonitor:
         # Connect to Matrix
         await self.client.connect()
 
+        # Log device info for E2EE verification
+        self.client.log_device_info()
+
         # Do initial sync WITHOUT event callbacks to skip historical messages
         logger.info("Matrix monitor performing initial sync (skipping historical messages)...")
         await self.client.sync(timeout=10000)
@@ -239,6 +242,11 @@ class MatrixMonitor:
         # Set up event callbacks AFTER initial sync
         self.client.add_event_callback(self.on_room_message, RoomMessageText)
         self.client.add_event_callback(self.on_megolm_event, MegolmEvent)
+
+        # Set up key verification callback for E2EE
+        self.client.add_to_device_callback(
+            self.client.handle_key_verification_event, KeyVerificationEvent
+        )
 
         logger.info("Matrix monitor starting sync loop")
 

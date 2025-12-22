@@ -273,6 +273,15 @@ async def main(config_path: str) -> None:
             print("Uploading encryption keys...")
             await client.keys_upload()
 
+        # Display device info for E2EE verification
+        if encryption_enabled and client.olm:
+            print(f"\nDevice ID: {device_id}")
+            fingerprint = client.olm.account.identity_keys["ed25519"]
+            formatted_fp = " ".join(fingerprint[i : i + 4] for i in range(0, len(fingerprint), 4))
+            print(f"Fingerprint (Ed25519): {formatted_fp}")
+            print("Verify this device in Element: Settings > Security > Verify")
+            print()
+
         # Show initial invites
         invites = await get_pending_invites(client)
         print_invites(invites)
