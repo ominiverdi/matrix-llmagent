@@ -88,7 +88,8 @@ class MCPClientManager:
         servers = mcp_config.get("servers", {})
 
         for name, server_cfg in servers.items():
-            transport = server_cfg.get("transport", "stdio")
+            # Support both "transport" and "type" keys (type is standard MCP config format)
+            transport = server_cfg.get("transport") or server_cfg.get("type", "stdio")
             self._server_configs[name] = MCPServerConfig(
                 name=name,
                 transport=transport,
