@@ -1,0 +1,47 @@
+{
+  "description": "Test library browsing heuristic commands",
+  "timeout_seconds": 60,
+  "mode": "serious",
+  "steps": [
+    {
+      "input": "docs",
+      "expect_contains": ["Documents in library:", "doc N"],
+      "expect_not_contains": ["Error", "not configured"]
+    },
+    {
+      "input": "n",
+      "expect_contains": ["Documents in library:", "page 2"],
+      "expect_not_contains": ["Error"]
+    },
+    {
+      "input": "doc 1",
+      "expect_contains": ["Slug:", "Pages:"],
+      "expect_not_contains": ["Error", "not found"]
+    },
+    {
+      "input": "figures all",
+      "expect_contains": ["figures in", "show N"],
+      "expect_not_contains": ["Error", "Select a document"]
+    },
+    {
+      "input": "show 1",
+      "expect_contains": ["indices"],
+      "expect_not_contains": ["Error", "No cached results"]
+    },
+    {
+      "input": "tables all",
+      "expect_contains": ["tables in"],
+      "expect_not_contains": ["Error", "Select a document"]
+    },
+    {
+      "input": "clear",
+      "expect_contains": ["Cleared"],
+      "expect_not_contains": ["Error"]
+    },
+    {
+      "input": "doc 1",
+      "expect_contains": ["Run 'docs' first"],
+      "expect_not_contains": ["Error"]
+    }
+  ]
+}

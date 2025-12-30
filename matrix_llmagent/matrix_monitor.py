@@ -16,9 +16,15 @@ from .agentic_actor.library_tool import (
     LibraryResultsCache,
     fetch_library_image,
     fetch_library_page,
+    format_document_info,
+    format_document_list,
+    format_element_list,
     format_sources_list,
     get_best_image_path,
     get_citation_tag,
+    get_document_info,
+    list_documents,
+    list_elements,
     search_library_direct,
 )
 from .agentic_actor.tools import (
@@ -106,9 +112,9 @@ def _parse_show_command(message: str) -> list[int] | None:
 def _parse_page_command(message: str) -> tuple[str, int | None] | None:
     """Parse page navigation commands.
 
-    Supports:
-        !next, !prev - navigate relative to current page
-        !page 50, !page50 - jump to specific page
+    Supports (with or without ! prefix):
+        next, prev - navigate relative to current page
+        page 50, page50 - jump to specific page
 
     Returns:
         Tuple of (command, page_number) where command is 'next', 'prev', or 'goto'.
@@ -117,13 +123,14 @@ def _parse_page_command(message: str) -> tuple[str, int | None] | None:
     """
     msg = message.strip().lower()
 
-    if msg in ("!next", "!n"):
+    # Accept with or without ! prefix
+    if msg in ("!next", "!n", "next", "n"):
         return ("next", None)
-    if msg in ("!prev", "!p", "!previous"):
+    if msg in ("!prev", "!p", "!previous", "prev", "previous"):
         return ("prev", None)
 
-    # !page N or !pageN
-    match = re.match(r"^!page\s*(\d+)$", msg)
+    # page N or pageN (with or without !)
+    match = re.match(r"^!?page\s*(\d+)$", msg)
     if match:
         return ("goto", int(match.group(1)))
 
@@ -133,9 +140,9 @@ def _parse_page_command(message: str) -> tuple[str, int | None] | None:
 def _parse_source_command(message: str) -> tuple[str, int | None] | None:
     """Parse source viewing commands.
 
-    Supports:
-        !sources - list all sources from last search
-        !source N, !source 3 - view source page N
+    Supports (with or without ! prefix):
+        sources - list all sources from last search
+        source N - view source page N
 
     Returns:
         Tuple of (command, index) where command is 'list' or 'view'.
@@ -144,15 +151,108 @@ def _parse_source_command(message: str) -> tuple[str, int | None] | None:
     """
     msg = message.strip().lower()
 
-    if msg == "!sources":
+    # Accept with or without ! prefix
+    if msg in ("!sources", "sources"):
         return ("list", None)
 
-    # !source N
-    match = re.match(r"^!source\s+(\d+)$", msg)
+    # source N (with or without !)
+    match = re.match(r"^!?source\s+(\d+)$", msg)
     if match:
         return ("view", int(match.group(1)))
 
     return None
+
+
+def _parse_docs_command(message: str) -> int | None:
+    """Parse 'docs' command with optional page number.
+
+    Supports:
+        docs - list documents (page 1)
+        docs N - list documents page N
+
+    Returns:
+        Page number (default 1) or None if not a docs command.
+    """
+    msg = message.strip().lower()
+
+    if msg == "docs":
+        return 1
+
+    match = re.match(r"^docs\s+(\d+)$", msg)
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+def _parse_doc_command(message: str) -> str | int | None:
+    """Parse 'doc' command with slug or index.
+
+    Supports:
+        doc <slug> - select document by slug
+        doc N - select document by index from last docs listing
+
+    Returns:
+        Slug (str) or index (int) or None if not a doc command.
+    """
+    msg = message.strip()
+
+    # doc N (index)
+    match = re.match(r"^doc\s+(\d+)$", msg, re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+
+    # doc <slug> (any non-whitespace string)
+    match = re.match(r"^doc\s+(\S+)$", msg, re.IGNORECASE)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def _parse_elements_command(message: str) -> tuple[str, bool] | None:
+    """Parse element listing commands.
+
+    Supports:
+        figures, tables, equations - list elements (page-scoped if viewing a page)
+        figures all, tables all, equations all - list all elements in document
+
+    Returns:
+        Tuple of (element_type, show_all) or None if not an elements command.
+    """
+    msg = message.strip().lower()
+
+    for elem_type in ("figures", "tables", "equations"):
+        if msg == elem_type:
+            # Singular form for API
+            return (elem_type.rstrip("s"), False)
+        if msg == f"{elem_type} all":
+            return (elem_type.rstrip("s"), True)
+
+    return None
+
+
+def _parse_nav_command(message: str) -> str | None:
+    """Parse navigation commands for document list or page navigation.
+
+    Returns 'next' or 'prev' if it's a navigation command, None otherwise.
+    """
+    msg = message.strip().lower()
+
+    if msg in ("n", "next"):
+        return "next"
+    if msg in ("p", "prev"):
+        return "prev"
+
+    return None
+
+
+def _parse_clear_command(message: str) -> bool:
+    """Parse clear command.
+
+    Returns True if it's a clear command, False otherwise.
+    """
+    return message.strip().lower() == "clear"
 
 
 def _truncate_to_words(text: str, max_words: int = DEFAULT_SUMMARY_WORDS) -> str:
@@ -303,6 +403,32 @@ class MatrixMonitor:
         if source_cmd is not None:
             cmd, index = source_cmd
             await self._handle_source_command(room_id, cmd, index)
+            return
+
+        # Check for library browsing commands (docs, doc, figures, etc.)
+        docs_page = _parse_docs_command(message)
+        if docs_page is not None:
+            await self._handle_docs_command(room_id, docs_page)
+            return
+
+        doc_arg = _parse_doc_command(message)
+        if doc_arg is not None:
+            await self._handle_doc_command(room_id, doc_arg)
+            return
+
+        elements_cmd = _parse_elements_command(message)
+        if elements_cmd is not None:
+            elem_type, show_all = elements_cmd
+            await self._handle_elements_command(room_id, elem_type, show_all)
+            return
+
+        nav_cmd = _parse_nav_command(message)
+        if nav_cmd is not None:
+            await self._handle_nav_command(room_id, nav_cmd)
+            return
+
+        if _parse_clear_command(message):
+            await self._handle_clear_command(room_id)
             return
 
         # Check if message is addressed to us
@@ -706,8 +832,12 @@ class MatrixMonitor:
         help_text += """
 
 Source Viewing:
-  !sources - List sources from last search
-  !source N - View source page N"""
+  sources - List sources from last search
+  source N - View source page N
+
+Page Navigation:
+  next / prev - Navigate pages
+  page N - Jump to page N"""
 
         if tool_lines:
             help_text += "\n\nTools Available:\n" + "\n".join(tool_lines)
@@ -717,7 +847,7 @@ Source Viewing:
         if lib_config.get("enabled"):
             help_text += "\n  - Use !l for quick library search, then 'show N' to view images"
 
-        help_text += "\n  - Use !next/!prev/!page N to navigate document pages"
+        help_text += "\n  - Use next/prev/page N to navigate document pages"
         help_text += "\n  - Use !clear to reset history and caches if responses get confused"
 
         await self.client.send_message(room_id, help_text)
@@ -738,22 +868,22 @@ Commands:
   !l <query> - Search the library
 
 View Sources (golden cord):
-  !sources - List sources from last search
-  !source N - View source page N
+  sources - List sources from last search
+  source N - View source page N
 
 View Elements:
   show N - View element N (figure/table/equation)
 
 Page Navigation:
-  !next / !prev - Navigate pages
-  !page N - Jump to page N
+  next / prev - Navigate pages
+  page N - Jump to page N
 
 Examples:
   !l mercator projection
-  !sources
-  !source 2
+  sources
+  source 2
   show 3
-  !next
+  next
 
 Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY_TOUR.md"""
 
@@ -994,7 +1124,7 @@ After verification, encrypted messages should work correctly."""
         )
 
         # Send caption first, then image
-        caption = f"Page {result.page_number} of {result.total_pages}: {result.document_title}\n\n[!next/!prev to navigate, !page N to jump]"
+        caption = f"Page {result.page_number} of {result.total_pages}: {result.document_title}\n\n[next/prev to navigate, page N to jump]"
         await self.client.send_message(room_id, caption)
         await self.client.send_image(
             room_id,
@@ -1128,7 +1258,7 @@ After verification, encrypted messages should work correctly."""
         )
 
         # Send caption and image
-        caption = f"Source [{index}]: Page {page_result.page_number} of {page_result.total_pages} - {page_result.document_title}\n\n[!next/!prev to navigate, !sources to list all]"
+        caption = f"Source [{index}]: Page {page_result.page_number} of {page_result.total_pages} - {page_result.document_title}\n\n[next/prev to navigate, sources to list all]"
         await self.client.send_message(room_id, caption)
         await self.client.send_image(
             room_id,
@@ -1231,6 +1361,254 @@ After verification, encrypted messages should work correctly."""
         )
 
         await self.client.send_message(room_id, formatted)
+
+    async def _handle_docs_command(self, room_id: str, page: int) -> None:
+        """Handle 'docs' command - list documents with pagination.
+
+        Args:
+            room_id: Matrix room ID
+            page: Page number to display (1-indexed)
+        """
+        lib_config = self.config.get("tools", {}).get("library", {})
+        if not lib_config.get("enabled") or not lib_config.get("base_url"):
+            await self.client.send_message(room_id, "Library is not configured.")
+            return
+
+        cache = getattr(self.agent, "library_cache", None)
+        if cache is None:
+            await self.client.send_message(room_id, "Library cache not initialized.")
+            return
+
+        base_url = lib_config["base_url"]
+        page_size = 5  # Match Rust CLI
+        arc = f"matrix#{room_id}"
+
+        result = await list_documents(base_url, page=page, page_size=page_size)
+
+        if isinstance(result, str):
+            await self.client.send_message(room_id, f"Error: {result}")
+            return
+
+        documents = result.get("documents", [])
+        total_pages = result.get("total_pages", 1)
+
+        # Store in cache for doc N selection and next/prev navigation
+        cache.store_document_list(arc, page, total_pages, page_size, documents)
+
+        # Format and display
+        output = format_document_list(documents, page, total_pages)
+        await self.client.send_message(room_id, output)
+
+    async def _handle_doc_command(self, room_id: str, slug_or_index: str | int) -> None:
+        """Handle 'doc' command - select document and show details.
+
+        Args:
+            room_id: Matrix room ID
+            slug_or_index: Document slug string or index from last docs listing
+        """
+        lib_config = self.config.get("tools", {}).get("library", {})
+        if not lib_config.get("enabled") or not lib_config.get("base_url"):
+            await self.client.send_message(room_id, "Library is not configured.")
+            return
+
+        cache = getattr(self.agent, "library_cache", None)
+        if cache is None:
+            await self.client.send_message(room_id, "Library cache not initialized.")
+            return
+
+        base_url = lib_config["base_url"]
+        arc = f"matrix#{room_id}"
+
+        # Resolve index to slug if needed
+        if isinstance(slug_or_index, int):
+            doc_list = cache.get_document_list(arc)
+            if doc_list is None:
+                await self.client.send_message(
+                    room_id, "Run 'docs' first to see available documents."
+                )
+                return
+
+            index = slug_or_index
+            if index < 1 or index > len(doc_list.documents):
+                await self.client.send_message(
+                    room_id, f"Invalid document number. Use 1-{len(doc_list.documents)}."
+                )
+                return
+
+            slug = doc_list.documents[index - 1].get("slug")
+            if not slug:
+                await self.client.send_message(room_id, "Error: Document slug not found in cache.")
+                return
+        else:
+            slug = slug_or_index
+
+        # Fetch document info
+        result = await get_document_info(base_url, slug)
+
+        if isinstance(result, str):
+            await self.client.send_message(room_id, f"Error: {result}")
+            return
+
+        # Store document view in cache
+        cache.store_document_view(
+            arc,
+            document_slug=result.get("slug", slug),
+            document_title=result.get("title", "Unknown"),
+            total_pages=result.get("total_pages", 0),
+            element_counts=result.get("element_counts", {}),
+            keywords=result.get("keywords", []),
+            summary=result.get("summary", ""),
+        )
+
+        # Format and display
+        output = format_document_info(result)
+        await self.client.send_message(room_id, output)
+
+    async def _handle_elements_command(
+        self, room_id: str, element_type: str, show_all: bool
+    ) -> None:
+        """Handle 'figures'/'tables'/'equations' commands - list elements.
+
+        Args:
+            room_id: Matrix room ID
+            element_type: Type to list (figure, table, equation)
+            show_all: If True, show all elements; if False, filter to current page
+        """
+        lib_config = self.config.get("tools", {}).get("library", {})
+        if not lib_config.get("enabled") or not lib_config.get("base_url"):
+            await self.client.send_message(room_id, "Library is not configured.")
+            return
+
+        cache = getattr(self.agent, "library_cache", None)
+        if cache is None:
+            await self.client.send_message(room_id, "Library cache not initialized.")
+            return
+
+        arc = f"matrix#{room_id}"
+
+        # Need a document selected
+        doc_view = cache.get_document_view(arc)
+        if doc_view is None:
+            await self.client.send_message(room_id, "Select a document first with 'doc <slug>'.")
+            return
+
+        base_url = lib_config["base_url"]
+
+        # Determine page filter
+        page_filter = None
+        if not show_all:
+            page_view = cache.get_page_view(arc)
+            if page_view and page_view.document_slug == doc_view.document_slug:
+                page_filter = page_view.page
+
+        # Fetch elements
+        result = await list_elements(
+            base_url,
+            doc_view.document_slug,
+            element_type=element_type,
+            page=page_filter,
+            limit=50,
+        )
+
+        if isinstance(result, str):
+            await self.client.send_message(room_id, f"Error: {result}")
+            return
+
+        elements = result.get("elements", [])
+        total = result.get("total", len(elements))
+
+        # Store elements in cache for show N command
+        cache_elements = []
+        for elem in elements:
+            cache_elements.append(
+                {
+                    "source_type": "element",
+                    "element_type": element_type,
+                    "element_label": elem.get("label", ""),
+                    "page_number": elem.get("page_number"),
+                    "content": elem.get("description", ""),
+                    "crop_path": elem.get("crop_path", ""),
+                    "rendered_path": elem.get("rendered_path", ""),
+                    "document_slug": doc_view.document_slug,
+                    "document_title": doc_view.document_title,
+                }
+            )
+        cache.store_element_list(arc, cache_elements)
+        cache.store(arc, cache_elements)
+
+        # Format and display
+        output = format_element_list(
+            elements,
+            element_type,
+            doc_view.document_title,
+            page_filter=page_filter,
+            total=total,
+        )
+        await self.client.send_message(room_id, output)
+
+    async def _handle_nav_command(self, room_id: str, direction: str) -> None:
+        """Handle context-aware next/prev navigation.
+
+        Navigates documents list if last action was 'docs', otherwise navigates pages.
+
+        Args:
+            room_id: Matrix room ID
+            direction: 'next' or 'prev'
+        """
+        cache = getattr(self.agent, "library_cache", None)
+        if cache is None:
+            await self.client.send_message(
+                room_id, "Nothing to navigate. Try 'docs' or view a page first."
+            )
+            return
+
+        arc = f"matrix#{room_id}"
+        context = cache.get_navigation_context(arc)
+
+        if context == "documents":
+            # Navigate document list
+            doc_list = cache.get_document_list(arc)
+            if doc_list is None:
+                await self.client.send_message(room_id, "No document list. Run 'docs' first.")
+                return
+
+            if direction == "next":
+                if doc_list.page >= doc_list.total_pages:
+                    await self.client.send_message(
+                        room_id,
+                        f"Already at last page (page {doc_list.page}/{doc_list.total_pages}).",
+                    )
+                    return
+                await self._handle_docs_command(room_id, doc_list.page + 1)
+            else:  # prev
+                if doc_list.page <= 1:
+                    await self.client.send_message(
+                        room_id,
+                        f"Already at first page (page 1/{doc_list.total_pages}).",
+                    )
+                    return
+                await self._handle_docs_command(room_id, doc_list.page - 1)
+
+        elif context == "pages":
+            # Navigate pages - delegate to existing handler
+            await self._handle_page_command(room_id, direction, None)
+
+        else:
+            await self.client.send_message(
+                room_id, "Nothing to navigate. Try 'docs' or view a page first."
+            )
+
+    async def _handle_clear_command(self, room_id: str) -> None:
+        """Handle 'clear' command - clear library state.
+
+        Args:
+            room_id: Matrix room ID
+        """
+        cache = getattr(self.agent, "library_cache", None)
+        if cache:
+            arc = f"matrix#{room_id}"
+            cache.clear_all(arc)
+        await self.client.send_message(room_id, "Cleared library state.")
 
     async def send_message(self, room_id: str, message: str) -> None:
         """Send a message to a Matrix room.

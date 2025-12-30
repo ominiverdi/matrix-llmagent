@@ -14,9 +14,16 @@ from .agentic_actor.library_tool import (
     LibraryResultsCache,
     fetch_library_image,
     fetch_library_page,
+    format_document_info,
+    format_document_list,
+    format_element_list,
     format_sources_list,
     get_best_image_path,
+    get_document_info,
+    get_library_context_summary,
     library_search_tool_def,
+    list_documents,
+    list_elements,
     search_library_direct,
 )
 from .agentic_actor.tools import (
@@ -151,6 +158,15 @@ class MatrixLLMAgent:
                 max_rooms=100,
             )
 
+        # Initialize MCP client manager if configured
+        from .mcp_client import MCPClientManager
+
+        self.mcp_manager: MCPClientManager | None = None
+        mcp_config = self.config.get("tools", {}).get("mcp", {})
+        if mcp_config.get("servers"):
+            self.mcp_manager = MCPClientManager(self.config)
+            logger.info("MCP client manager initialized (will connect on startup)")
+
     async def run_actor(
         self,
         context: list[dict[str, str]],
@@ -205,10 +221,24 @@ class MatrixLLMAgent:
                 "ALWAYS end your response by mentioning: Type `!l help` for a guided tour."
             )
 
+        # Create system prompt generator that includes library context
+        base_prompt = system_prompt
+
+        def generate_system_prompt() -> str:
+            prompt = base_prompt
+            # Add library browsing context if available
+            if self.library_cache is not None:
+                doc_view = self.library_cache.get_document_view(arc)
+                page_view = self.library_cache.get_page_view(arc)
+                context_str = get_library_context_summary(doc_view, page_view)
+                if context_str:
+                    prompt = prompt + f"\n\n{context_str}"
+            return prompt
+
         actor = AgenticLLMActor(
             config=self.config,
             model=model or mode_cfg["model"],
-            system_prompt_generator=lambda: system_prompt,
+            system_prompt_generator=generate_system_prompt,
             prompt_reminder_generator=lambda: mode_cfg.get("prompt_reminder"),
             prepended_context=prepended_context,
             agent=self,
@@ -259,6 +289,11 @@ class MatrixLLMAgent:
         # Initialize shared resources
         await self.history.initialize()
         await self.chronicle.initialize()
+
+        # Connect to MCP servers if configured
+        if self.mcp_manager is not None:
+            await self.mcp_manager.connect_all()
+
         # Scan and resume any open quests for whitelisted arcs
         await self.quests.scan_and_trigger_open_quests()
 
@@ -266,6 +301,8 @@ class MatrixLLMAgent:
             await self.matrix_monitor.run()
         finally:
             # Clean up shared resources
+            if self.mcp_manager is not None:
+                await self.mcp_manager.disconnect_all()
             await self.history.close()
             # Chronicle doesn't need explicit cleanup
 
@@ -363,8 +400,12 @@ def _print_cli_help(config: dict[str, Any]) -> None:
         print("\n".join(slot_lines))
 
     print("\nSource Viewing:")
-    print("  !sources      - List sources from last search")
-    print("  !source N     - View source page N")
+    print("  sources       - List sources from last search")
+    print("  source N      - View source page N")
+
+    print("\nPage Navigation:")
+    print("  next / prev   - Navigate pages")
+    print("  page N        - Jump to page N")
 
     print("\nSession:")
     print("  !clear        - Clear chat history and all caches (start fresh)")
@@ -378,7 +419,7 @@ def _print_cli_help(config: dict[str, Any]) -> None:
     print("  - Use !v prefix when you need a comprehensive answer upfront")
     if lib_config.get("enabled"):
         print("  - Use !l for quick library search, then 'show N' to view images")
-    print("  - Use !next/!prev/!page N to navigate document pages")
+    print("  - Use next/prev/page N to navigate document pages")
     print()
 
 
@@ -400,22 +441,22 @@ Commands:
   !l <query>        - Search the library
 
 View Sources (golden cord):
-  !sources          - List sources from last search
-  !source N         - View source page N
+  sources           - List sources from last search
+  source N          - View source page N
 
 View Elements:
   show N            - View element N (figure/table/equation)
 
 Page Navigation:
-  !next / !prev     - Navigate pages
-  !page N           - Jump to page N
+  next / prev       - Navigate pages
+  page N            - Jump to page N
 
 Examples:
   !l mercator projection
-  !sources
-  !source 2
+  sources
+  source 2
   show 3
-  !next
+  next
 
 Full guide: https://github.com/ominiverdi/matrix-llmagent/blob/main/docs/LIBRARY_TOUR.md
 """)
@@ -587,9 +628,9 @@ async def _handle_cli_show_command(
 def _parse_page_command(message: str) -> tuple[str, int | None] | None:
     """Parse page navigation commands.
 
-    Supports:
-        !next, !prev - navigate relative to current page
-        !page 50, !page50 - jump to specific page
+    Supports (with or without ! prefix):
+        next, prev - navigate relative to current page
+        page 50, page50 - jump to specific page
 
     Returns:
         Tuple of (command, page_number) where command is 'next', 'prev', or 'goto'.
@@ -598,13 +639,14 @@ def _parse_page_command(message: str) -> tuple[str, int | None] | None:
     """
     msg = message.strip().lower()
 
-    if msg in ("!next", "!n"):
+    # Accept with or without ! prefix
+    if msg in ("!next", "!n", "next", "n"):
         return ("next", None)
-    if msg in ("!prev", "!p", "!previous"):
+    if msg in ("!prev", "!p", "!previous", "prev", "previous"):
         return ("prev", None)
 
-    # !page N or !pageN
-    match = re.match(r"^!page\s*(\d+)$", msg)
+    # page N or pageN (with or without !)
+    match = re.match(r"^!?page\s*(\d+)$", msg)
     if match:
         return ("goto", int(match.group(1)))
 
@@ -614,9 +656,9 @@ def _parse_page_command(message: str) -> tuple[str, int | None] | None:
 def _parse_source_command(message: str) -> tuple[str, int | None] | None:
     """Parse source viewing commands.
 
-    Supports:
-        !sources - list all sources from last search
-        !source N - view source page N
+    Supports (with or without ! prefix):
+        sources - list all sources from last search
+        source N - view source page N
 
     Returns:
         Tuple of (command, index) where command is 'list' or 'view'.
@@ -625,13 +667,90 @@ def _parse_source_command(message: str) -> tuple[str, int | None] | None:
     """
     msg = message.strip().lower()
 
-    if msg == "!sources":
+    # Accept with or without ! prefix
+    if msg in ("!sources", "sources"):
         return ("list", None)
 
-    # !source N
-    match = re.match(r"^!source\s+(\d+)$", msg)
+    # source N (with or without !)
+    match = re.match(r"^!?source\s+(\d+)$", msg)
     if match:
         return ("view", int(match.group(1)))
+
+    return None
+
+
+def _parse_docs_command(message: str) -> int | None:
+    """Parse 'docs' command with optional page number.
+
+    Supports:
+        docs - list documents (page 1)
+        docs N - list documents page N
+
+    Returns:
+        Page number (default 1) or None if not a docs command.
+    """
+    msg = message.strip().lower()
+
+    if msg == "docs":
+        return 1
+
+    match = re.match(r"^docs\s+(\d+)$", msg)
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+def _parse_doc_command(message: str) -> str | int | None:
+    """Parse 'doc' command with slug or index.
+
+    Supports:
+        doc <slug> - select document by slug
+        doc N - select document by index from last docs listing
+
+    Returns:
+        Slug string, index int, or None if not a doc command.
+    """
+    msg = message.strip()
+
+    match = re.match(r"^doc\s+(\d+)$", msg.lower())
+    if match:
+        return int(match.group(1))
+
+    match = re.match(r"^doc\s+(\S+)$", msg.lower())
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def _parse_elements_command(message: str) -> tuple[str, bool] | None:
+    """Parse element listing commands.
+
+    Supports:
+        figures, tables, equations - list elements (page-filtered if viewing a page)
+        figures all, tables all, equations all - list all elements in document
+
+    Returns:
+        Tuple of (element_type, show_all) or None if not an elements command.
+    """
+    msg = message.strip().lower()
+
+    # Check for "all" variants first
+    for elem_type in ("figures", "tables", "equations"):
+        if msg == f"{elem_type} all":
+            # Convert plural to singular
+            singular = elem_type[:-1] if elem_type != "equations" else "equation"
+            return (singular, True)
+
+    # Check for simple commands
+    type_map = {
+        "figures": "figure",
+        "tables": "table",
+        "equations": "equation",
+    }
+    if msg in type_map:
+        return (type_map[msg], False)
 
     return None
 
@@ -708,7 +827,7 @@ async def _handle_cli_page_command(
     if not _render_image_with_chafa(result.image_data, None):
         print("(Page image could not be rendered)")
 
-    print("\n[!next/!prev to navigate, !page N to jump]")
+    print("\n[next/prev to navigate, page N to jump]")
 
 
 async def _handle_cli_source_command(
@@ -845,7 +964,7 @@ async def _handle_cli_library_source_command(
     if not _render_image_with_chafa(page_result.image_data, None):
         print("(Page image could not be rendered)")
 
-    print("\n[!next/!prev to navigate, !sources to list all]")
+    print("\n[next/prev to navigate, sources to list all]")
 
 
 def _handle_cli_kb_source_command(
@@ -895,6 +1014,249 @@ def _handle_cli_web_source_command(
     print(detail_text)
 
 
+async def _handle_cli_docs_command(
+    agent: "MatrixLLMAgent",
+    page: int,
+    arc: str,
+) -> None:
+    """Handle 'docs' command - list documents with pagination.
+
+    Args:
+        agent: MatrixLLMAgent instance with library_cache
+        page: Page number to display (1-indexed)
+        arc: Arc identifier for cache storage
+    """
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        print("Library is not configured.")
+        return
+
+    cache = agent.library_cache
+    if cache is None:
+        print("Library cache not initialized.")
+        return
+
+    base_url = lib_config["base_url"]
+    page_size = 5  # Match Rust CLI
+
+    result = await list_documents(base_url, page=page, page_size=page_size)
+
+    if isinstance(result, str):
+        print(f"Error: {result}")
+        return
+
+    documents = result.get("documents", [])
+    total_pages = result.get("total_pages", 1)
+
+    # Store in cache for doc N selection and next/prev navigation
+    cache.store_document_list(arc, page, total_pages, page_size, documents)
+
+    # Format and display
+    output = format_document_list(documents, page, total_pages)
+    print(output)
+
+
+async def _handle_cli_doc_command(
+    agent: "MatrixLLMAgent",
+    slug_or_index: str | int,
+    arc: str,
+) -> None:
+    """Handle 'doc' command - select document and show details.
+
+    Args:
+        agent: MatrixLLMAgent instance with library_cache
+        slug_or_index: Document slug string or index from last docs listing
+        arc: Arc identifier for cache storage
+    """
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        print("Library is not configured.")
+        return
+
+    cache = agent.library_cache
+    if cache is None:
+        print("Library cache not initialized.")
+        return
+
+    base_url = lib_config["base_url"]
+
+    # Resolve index to slug if needed
+    if isinstance(slug_or_index, int):
+        doc_list = cache.get_document_list(arc)
+        if doc_list is None:
+            print("Run 'docs' first to see available documents.")
+            return
+
+        index = slug_or_index
+        if index < 1 or index > len(doc_list.documents):
+            print(f"Invalid document number. Use 1-{len(doc_list.documents)}.")
+            return
+
+        slug = doc_list.documents[index - 1].get("slug")
+        if not slug:
+            print("Error: Document slug not found in cache.")
+            return
+    else:
+        slug = slug_or_index
+
+    # Fetch document info
+    result = await get_document_info(base_url, slug)
+
+    if isinstance(result, str):
+        print(f"Error: {result}")
+        return
+
+    # Store document view in cache
+    cache.store_document_view(
+        arc,
+        document_slug=result.get("slug", slug),
+        document_title=result.get("title", "Unknown"),
+        total_pages=result.get("total_pages", 0),
+        element_counts=result.get("element_counts", {}),
+        keywords=result.get("keywords", []),
+        summary=result.get("summary", ""),
+    )
+
+    # Format and display
+    output = format_document_info(result)
+    print(output)
+
+
+async def _handle_cli_elements_command(
+    agent: "MatrixLLMAgent",
+    element_type: str,
+    show_all: bool,
+    arc: str,
+) -> None:
+    """Handle 'figures'/'tables'/'equations' commands - list elements.
+
+    Args:
+        agent: MatrixLLMAgent instance with library_cache
+        element_type: Type to list (figure, table, equation)
+        show_all: If True, show all elements; if False, filter to current page
+        arc: Arc identifier for cache storage
+    """
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        print("Library is not configured.")
+        return
+
+    cache = agent.library_cache
+    if cache is None:
+        print("Library cache not initialized.")
+        return
+
+    # Need a document selected
+    doc_view = cache.get_document_view(arc)
+    if doc_view is None:
+        print("Select a document first with 'doc <slug>'.")
+        return
+
+    base_url = lib_config["base_url"]
+
+    # Determine page filter
+    page_filter = None
+    if not show_all:
+        page_view = cache.get_page_view(arc)
+        if page_view and page_view.document_slug == doc_view.document_slug:
+            page_filter = page_view.page
+
+    # Fetch elements
+    result = await list_elements(
+        base_url,
+        doc_view.document_slug,
+        element_type=element_type,
+        page=page_filter,
+        limit=50,
+    )
+
+    if isinstance(result, str):
+        print(f"Error: {result}")
+        return
+
+    elements = result.get("elements", [])
+    total = result.get("total", len(elements))
+
+    # Store elements in cache for show N command
+    # Convert to format expected by show command (add source_type for compatibility)
+    cache_elements = []
+    for elem in elements:
+        cache_elements.append(
+            {
+                "source_type": "element",
+                "element_type": element_type,
+                "element_label": elem.get("label", ""),
+                "page_number": elem.get("page_number"),
+                "content": elem.get("description", ""),
+                "crop_path": elem.get("crop_path", ""),
+                "rendered_path": elem.get("rendered_path", ""),
+                "document_slug": doc_view.document_slug,
+                "document_title": doc_view.document_title,
+            }
+        )
+    cache.store_element_list(arc, cache_elements)
+
+    # Also store in main cache for show command compatibility
+    cache.store(arc, cache_elements)
+
+    # Format and display
+    output = format_element_list(
+        elements,
+        element_type,
+        doc_view.document_title,
+        page_filter=page_filter,
+        total=total,
+    )
+    print(output)
+
+
+async def _handle_cli_nav_command(
+    agent: "MatrixLLMAgent",
+    direction: str,
+    arc: str,
+) -> None:
+    """Handle context-aware next/prev navigation.
+
+    Navigates documents list if last action was 'docs', otherwise navigates pages.
+
+    Args:
+        agent: MatrixLLMAgent instance with library_cache
+        direction: 'next' or 'prev'
+        arc: Arc identifier for cache lookup
+    """
+    cache = agent.library_cache
+    if cache is None:
+        print("Nothing to navigate. Try 'docs' or view a page first.")
+        return
+
+    context = cache.get_navigation_context(arc)
+
+    if context == "documents":
+        # Navigate document list
+        doc_list = cache.get_document_list(arc)
+        if doc_list is None:
+            print("No document list. Run 'docs' first.")
+            return
+
+        if direction == "next":
+            if doc_list.page >= doc_list.total_pages:
+                print(f"Already at last page (page {doc_list.page}/{doc_list.total_pages}).")
+                return
+            await _handle_cli_docs_command(agent, doc_list.page + 1, arc)
+        else:  # prev
+            if doc_list.page <= 1:
+                print(f"Already at first page (page 1/{doc_list.total_pages}).")
+                return
+            await _handle_cli_docs_command(agent, doc_list.page - 1, arc)
+
+    elif context == "pages":
+        # Navigate pages - delegate to existing handler
+        await _handle_cli_page_command(agent, direction, None, arc)
+
+    else:
+        print("Nothing to navigate. Try 'docs' or view a page first.")
+
+
 async def cli_message(message: str, config_path: str | None = None) -> None:
     """CLI mode for testing message handling including command parsing."""
     # Load configuration
@@ -909,6 +1271,10 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         agent = MatrixLLMAgent(str(config_file))
         await agent.history.initialize()
         await agent.chronicle.initialize()
+
+        # Connect to MCP servers if configured
+        if agent.mcp_manager is not None:
+            await agent.mcp_manager.connect_all()
 
         # Handle help command
         if message.lower().strip() in ("!h", "!help", "help"):
@@ -925,7 +1291,11 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         page_cmd = _parse_page_command(message)
         if page_cmd is not None:
             cmd, page_num = page_cmd
-            await _handle_cli_page_command(agent, cmd, page_num, "cli#test")
+            if cmd in ("next", "prev"):
+                # Use context-aware navigation
+                await _handle_cli_nav_command(agent, cmd, "cli#test")
+            else:
+                await _handle_cli_page_command(agent, cmd, page_num, "cli#test")
             return
 
         # Handle source viewing commands (!sources, !source N)
@@ -933,6 +1303,25 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         if source_cmd is not None:
             cmd, idx = source_cmd
             await _handle_cli_source_command(agent, cmd, idx, "cli#test")
+            return
+
+        # Handle docs command
+        docs_page = _parse_docs_command(message)
+        if docs_page is not None:
+            await _handle_cli_docs_command(agent, docs_page, "cli#test")
+            return
+
+        # Handle doc command
+        doc_arg = _parse_doc_command(message)
+        if doc_arg is not None:
+            await _handle_cli_doc_command(agent, doc_arg, "cli#test")
+            return
+
+        # Handle elements commands (figures, tables, equations)
+        elements_cmd = _parse_elements_command(message)
+        if elements_cmd is not None:
+            elem_type, show_all = elements_cmd
+            await _handle_cli_elements_command(agent, elem_type, show_all, "cli#test")
             return
 
         # Handle !l library search command (direct, no LLM)
@@ -1058,12 +1447,18 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
                 " Keep responses to 1 sentence max. Users can say 'tell me more' for details."
             )
 
+        # Image callback for CLI - render with chafa
+        async def cli_image_callback(image_bytes: bytes, mimetype: str) -> None:
+            print()  # Blank line before image
+            _render_image_with_chafa(image_bytes, None)
+
         # Run actor
         response = await agent.run_actor(
             context,
             mode_cfg=mode_cfg,
             system_prompt=system_prompt,
             arc="cli#test",
+            image_callback=cli_image_callback,
         )
 
         print("-" * 60)
@@ -1084,6 +1479,9 @@ async def cli_message(message: str, config_path: str | None = None) -> None:
         traceback.print_exc()
         sys.exit(1)
     finally:
+        # Cleanup MCP connections
+        if agent.mcp_manager is not None:
+            await agent.mcp_manager.disconnect_all()
         await agent.history.close()
 
 
@@ -1171,22 +1569,17 @@ async def cli_interactive(config_path: str | None = None) -> None:
                 continue
 
             # Handle clear command - reset history and caches
-            if message.lower() in ("!clear", "!reset"):
+            if message.lower() in ("!clear", "!reset", "clear"):
                 # Clear chat history for this arc
                 await agent.history.clear_arc("cli", "interactive")
                 # Clear all caches
                 if agent.library_cache:
-                    agent.library_cache.clear(arc)
+                    agent.library_cache.clear_all(arc)
                 if agent.kb_cache:
                     agent.kb_cache.clear(arc)
                 if agent.web_search_cache:
                     agent.web_search_cache.clear(arc)
-                # Clear page view state
-                if hasattr(agent, "_cli_page_view"):
-                    delattr(agent, "_cli_page_view")
-                print(
-                    "Cleared: chat history, library cache, KB cache, web search cache, page state"
-                )
+                print("Cleared: chat history, library cache, KB cache, web search cache")
                 continue
 
             # Handle show command
@@ -1199,7 +1592,11 @@ async def cli_interactive(config_path: str | None = None) -> None:
             page_cmd = _parse_page_command(message)
             if page_cmd is not None:
                 cmd, page_num = page_cmd
-                await _handle_cli_page_command(agent, cmd, page_num, arc)
+                if cmd in ("next", "prev"):
+                    # Use context-aware navigation
+                    await _handle_cli_nav_command(agent, cmd, arc)
+                else:
+                    await _handle_cli_page_command(agent, cmd, page_num, arc)
                 continue
 
             # Handle source viewing commands (!sources, !source N)
@@ -1207,6 +1604,25 @@ async def cli_interactive(config_path: str | None = None) -> None:
             if source_cmd is not None:
                 cmd, idx = source_cmd
                 await _handle_cli_source_command(agent, cmd, idx, arc)
+                continue
+
+            # Handle docs command
+            docs_page = _parse_docs_command(message)
+            if docs_page is not None:
+                await _handle_cli_docs_command(agent, docs_page, arc)
+                continue
+
+            # Handle doc command
+            doc_arg = _parse_doc_command(message)
+            if doc_arg is not None:
+                await _handle_cli_doc_command(agent, doc_arg, arc)
+                continue
+
+            # Handle elements commands (figures, tables, equations)
+            elements_cmd = _parse_elements_command(message)
+            if elements_cmd is not None:
+                elem_type, show_all = elements_cmd
+                await _handle_cli_elements_command(agent, elem_type, show_all, arc)
                 continue
 
             # Handle !l library search (direct, no LLM)
@@ -1479,30 +1895,69 @@ async def run_conversation_test(
             is_command = False
 
             try:
-                # Check if this is a command (not sent to LLM)
-                if step_input.startswith("!"):
+                # Check if this is a heuristic command (not sent to LLM)
+                # Library browsing commands (no ! prefix)
+                docs_page = _parse_docs_command(step_input)
+                if docs_page is not None:
                     is_command = True
-                    # Handle various commands
+                    response = await _capture_cli_docs_command(agent, docs_page, arc)
+
+                if not is_command:
+                    doc_arg = _parse_doc_command(step_input)
+                    if doc_arg is not None:
+                        is_command = True
+                        response = await _capture_cli_doc_command(agent, doc_arg, arc)
+
+                if not is_command:
+                    elements_cmd = _parse_elements_command(step_input)
+                    if elements_cmd is not None:
+                        is_command = True
+                        elem_type, show_all = elements_cmd
+                        response = await _capture_cli_elements_command(
+                            agent, elem_type, show_all, arc
+                        )
+
+                if not is_command:
+                    # Navigation commands: n, p, next, prev
+                    nav_input = step_input.strip().lower()
+                    if nav_input in ("n", "next"):
+                        is_command = True
+                        response = await _capture_cli_nav_command(agent, "next", arc)
+                    elif nav_input in ("p", "prev"):
+                        is_command = True
+                        response = await _capture_cli_nav_command(agent, "prev", arc)
+
+                if not is_command and step_input.strip().lower() == "clear":
+                    # Clear command
+                    is_command = True
+                    response = await _capture_cli_clear_command(agent, arc)
+
+                if not is_command:
+                    # Show command (no ! prefix): show N, show N,M,...
                     show_indices = _parse_show_indices(step_input)
                     if show_indices is not None:
-                        # Capture show command output
+                        is_command = True
                         response = await _capture_cli_show_command(agent, show_indices)
-                    else:
-                        page_cmd = _parse_page_command(step_input)
-                        if page_cmd is not None:
-                            cmd, page_num = page_cmd
-                            response = await _capture_cli_page_command(agent, cmd, page_num, arc)
-                        else:
-                            source_cmd = _parse_source_command(step_input)
-                            if source_cmd is not None:
-                                cmd, idx = source_cmd
-                                response = await _capture_cli_source_command(agent, cmd, idx, arc)
-                            elif step_input.lower().startswith("!l "):
-                                query = step_input[3:].strip()
-                                response = await _capture_cli_library_search(agent, query, arc)
-                            else:
-                                # Unknown command, treat as regular message
-                                is_command = False
+
+                if not is_command:
+                    # Page command: page N
+                    page_cmd = _parse_page_command(step_input)
+                    if page_cmd is not None:
+                        is_command = True
+                        cmd, page_num = page_cmd
+                        response = await _capture_cli_page_command(agent, cmd, page_num, arc)
+
+                # Legacy ! prefixed commands
+                if not is_command and step_input.startswith("!"):
+                    source_cmd = _parse_source_command(step_input)
+                    if source_cmd is not None:
+                        is_command = True
+                        cmd, idx = source_cmd
+                        response = await _capture_cli_source_command(agent, cmd, idx, arc)
+                    elif step_input.lower().startswith("!l "):
+                        is_command = True
+                        query = step_input[3:].strip()
+                        response = await _capture_cli_library_search(agent, query, arc)
 
                 if not is_command:
                     # Regular message - send to LLM
@@ -1735,6 +2190,181 @@ async def _capture_cli_library_search(agent: "MatrixLLMAgent", query: str, arc: 
     )
 
     return formatted
+
+
+async def _capture_cli_docs_command(agent: "MatrixLLMAgent", page: int, arc: str) -> str:
+    """Capture output from docs command for testing."""
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        return "Library is not configured."
+
+    cache = agent.library_cache
+    if cache is None:
+        return "Library cache not initialized."
+
+    base_url = lib_config["base_url"]
+    page_size = 5
+
+    result = await list_documents(base_url, page=page, page_size=page_size)
+
+    if isinstance(result, str):
+        return f"Error: {result}"
+
+    documents = result.get("documents", [])
+    total_pages = result.get("total_pages", 1)
+
+    cache.store_document_list(arc, page, total_pages, page_size, documents)
+
+    return format_document_list(documents, page, total_pages)
+
+
+async def _capture_cli_doc_command(
+    agent: "MatrixLLMAgent", slug_or_index: str | int, arc: str
+) -> str:
+    """Capture output from doc command for testing."""
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        return "Library is not configured."
+
+    cache = agent.library_cache
+    if cache is None:
+        return "Library cache not initialized."
+
+    base_url = lib_config["base_url"]
+
+    if isinstance(slug_or_index, int):
+        doc_list = cache.get_document_list(arc)
+        if doc_list is None:
+            return "Run 'docs' first to see available documents."
+
+        index = slug_or_index
+        if index < 1 or index > len(doc_list.documents):
+            return f"Invalid document number. Use 1-{len(doc_list.documents)}."
+
+        slug = doc_list.documents[index - 1].get("slug")
+        if not slug:
+            return "Error: Document slug not found in cache."
+    else:
+        slug = slug_or_index
+
+    result = await get_document_info(base_url, slug)
+
+    if isinstance(result, str):
+        return f"Error: {result}"
+
+    cache.store_document_view(
+        arc,
+        document_slug=result.get("slug", slug),
+        document_title=result.get("title", "Unknown"),
+        total_pages=result.get("total_pages", 0),
+        element_counts=result.get("element_counts", {}),
+        keywords=result.get("keywords", []),
+        summary=result.get("summary", ""),
+    )
+
+    return format_document_info(result)
+
+
+async def _capture_cli_elements_command(
+    agent: "MatrixLLMAgent", element_type: str, show_all: bool, arc: str
+) -> str:
+    """Capture output from figures/tables/equations command for testing."""
+    lib_config = agent.config.get("tools", {}).get("library", {})
+    if not lib_config.get("enabled") or not lib_config.get("base_url"):
+        return "Library is not configured."
+
+    cache = agent.library_cache
+    if cache is None:
+        return "Library cache not initialized."
+
+    doc_view = cache.get_document_view(arc)
+    if doc_view is None:
+        return "Select a document first with 'doc <slug>'."
+
+    base_url = lib_config["base_url"]
+
+    page_filter = None
+    if not show_all:
+        page_view = cache.get_page_view(arc)
+        if page_view and page_view.document_slug == doc_view.document_slug:
+            page_filter = page_view.page
+
+    result = await list_elements(
+        base_url,
+        doc_view.document_slug,
+        element_type=element_type,
+        page=page_filter,
+        limit=50,
+    )
+
+    if isinstance(result, str):
+        return f"Error: {result}"
+
+    elements = result.get("elements", [])
+    total = result.get("total", len(elements))
+
+    cache_elements = []
+    for elem in elements:
+        cache_elements.append(
+            {
+                "source_type": "element",
+                "element_type": element_type,
+                "element_label": elem.get("label", ""),
+                "page_number": elem.get("page_number"),
+                "content": elem.get("description", ""),
+                "crop_path": elem.get("crop_path", ""),
+                "rendered_path": elem.get("rendered_path", ""),
+                "document_slug": doc_view.document_slug,
+                "document_title": doc_view.document_title,
+            }
+        )
+    cache.store_element_list(arc, cache_elements)
+    cache.store(arc, cache_elements)
+
+    return format_element_list(
+        elements,
+        element_type,
+        doc_view.document_title,
+        page_filter=page_filter,
+        total=total,
+    )
+
+
+async def _capture_cli_nav_command(agent: "MatrixLLMAgent", direction: str, arc: str) -> str:
+    """Capture output from next/prev navigation for testing."""
+    cache = agent.library_cache
+    if cache is None:
+        return "Nothing to navigate. Try 'docs' or view a page first."
+
+    context = cache.get_navigation_context(arc)
+
+    if context == "documents":
+        doc_list = cache.get_document_list(arc)
+        if doc_list is None:
+            return "No document list. Run 'docs' first."
+
+        if direction == "next":
+            if doc_list.page >= doc_list.total_pages:
+                return f"Already at last page (page {doc_list.page}/{doc_list.total_pages})."
+            return await _capture_cli_docs_command(agent, doc_list.page + 1, arc)
+        else:
+            if doc_list.page <= 1:
+                return f"Already at first page (page 1/{doc_list.total_pages})."
+            return await _capture_cli_docs_command(agent, doc_list.page - 1, arc)
+
+    elif context == "pages":
+        return await _capture_cli_page_command(agent, direction, None, arc)
+
+    else:
+        return "Nothing to navigate. Try 'docs' or view a page first."
+
+
+async def _capture_cli_clear_command(agent: "MatrixLLMAgent", arc: str) -> str:
+    """Capture output from clear command for testing."""
+    cache = agent.library_cache
+    if cache:
+        cache.clear_all(arc)
+    return "Cleared library state."
 
 
 def main() -> None:

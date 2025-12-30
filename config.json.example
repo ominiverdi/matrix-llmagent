@@ -132,6 +132,23 @@
                 "max_rooms": 100
             }
         },
+        "mcp": {
+            "_comment": "Optional MCP (Model Context Protocol) servers. Tools from these servers are exposed to the agent.",
+            "servers": {
+                "time": {
+                    "_comment": "Time and timezone tools via uvx (no local install needed)",
+                    "command": ["uvx", "mcp-server-time"],
+                    "transport": "stdio"
+                },
+                "_osgeo-library": {
+                    "_comment": "OSGeo Library MCP server (disabled - configure path and remove underscore prefix to enable)",
+                    "command": "/path/to/osgeo-library/.venv/bin/python",
+                    "args": ["-m", "doclibrary.servers.mcp"],
+                    "cwd": "/path/to/osgeo-library",
+                    "transport": "stdio"
+                }
+            }
+        }
     },
     "actor": {
         "max_iterations": 10,

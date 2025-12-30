@@ -6,7 +6,6 @@ import aiohttp
 import pytest
 
 from matrix_llmagent.agentic_actor.tools import (
-    GetTimeExecutor,
     GoogleSearchExecutor,
     JinaSearchExecutor,
     LocalWebpageVisitor,
@@ -556,75 +555,6 @@ class TestToolExecutors:
         assert "matrix-llmagent" in executor.user_agent
         assert executor.user_agent.startswith("Mozilla/5.0")
 
-    @pytest.mark.asyncio
-    async def test_get_time_executor_with_timezone(self):
-        """Test get_time executor with a specific timezone."""
-        executor = GetTimeExecutor()
-
-        result = await executor.execute(timezone="America/Los_Angeles")
-
-        assert "America/Los_Angeles" in result
-        # Should contain day of week and date
-        assert any(
-            day in result
-            for day in [
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday",
-            ]
-        )
-        # Should contain AM or PM
-        assert "AM" in result or "PM" in result
-
-    @pytest.mark.asyncio
-    async def test_get_time_executor_without_timezone(self):
-        """Test get_time executor without timezone (server local time)."""
-        executor = GetTimeExecutor()
-
-        result = await executor.execute()
-
-        # Should contain day of week
-        assert any(
-            day in result
-            for day in [
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday",
-            ]
-        )
-        # Should contain AM or PM
-        assert "AM" in result or "PM" in result
-
-    @pytest.mark.asyncio
-    async def test_get_time_executor_invalid_timezone(self):
-        """Test get_time executor with invalid timezone."""
-        executor = GetTimeExecutor()
-
-        result = await executor.execute(timezone="Invalid/Timezone")
-
-        assert "Error" in result
-        assert "Invalid timezone" in result
-
-    @pytest.mark.asyncio
-    async def test_get_time_executor_various_timezones(self):
-        """Test get_time executor with various valid timezones."""
-        executor = GetTimeExecutor()
-
-        timezones = ["Europe/London", "Asia/Tokyo", "Australia/Sydney", "UTC"]
-
-        for tz in timezones:
-            result = await executor.execute(timezone=tz)
-            assert tz in result, f"Timezone {tz} should be in result"
-            assert "Error" not in result, f"Timezone {tz} should be valid"
-
 
 class TestToolRegistry:
     """Test tool registry and execution."""
@@ -1021,7 +951,7 @@ class TestKBSourcesFormatting:
         assert "[1] GeoServer Documentation" in output
         assert "GeoServer is an open source" in output
         assert "https://wiki.osgeo.org/GeoServer" in output
-        assert "!source N" in output
+        assert "source N" in output
 
     def test_format_kb_sources_list_with_entities(self):
         """Test formatting sources list with entities."""

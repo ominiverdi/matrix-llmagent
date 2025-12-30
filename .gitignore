@@ -12,3 +12,5 @@ bot.log
 localdocs/
 nio_store/
 test_store_check/
+# Local MCP integration tests (require external servers)
+tests/mcp_client/test_integration.py

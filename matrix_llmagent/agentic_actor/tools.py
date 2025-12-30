@@ -212,21 +212,6 @@ TOOLS: list[Tool] = [
         },
         "persist": "artifact",
     },
-    {
-        "name": "get_time",
-        "description": "Get the current time in a specified timezone. Use this for any time-related questions.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "timezone": {
-                    "type": "string",
-                    "description": "IANA timezone name (e.g., 'America/Los_Angeles', 'Europe/London', 'Asia/Tokyo'). If not specified, returns server local time.",
-                },
-            },
-            "required": [],
-        },
-        "persist": "none",
-    },
 ]
 
 # Add chronicle tools to the main tools list
@@ -353,7 +338,7 @@ def format_kb_sources_list(results: KBCachedResults, kb_name: str = "Knowledge B
         index += 1
 
     lines.append("")
-    lines.append("View full details: !source N")
+    lines.append("View full details: source N")
 
     return "\n".join(lines)
 
@@ -513,7 +498,7 @@ def format_web_sources_list(results: WebSearchCachedResults) -> str:
             lines.append(f"      {url}")
 
     lines.append("")
-    lines.append("View full details: !source N")
+    lines.append("View full details: source N")
 
     return "\n".join(lines)
 
@@ -1406,40 +1391,6 @@ class MakePlanExecutor:
         return "OK, follow this plan"
 
 
-class GetTimeExecutor:
-    """Executor for getting current time in a specified timezone."""
-
-    async def execute(self, timezone: str | None = None) -> str:
-        """Get current time in the specified timezone.
-
-        Args:
-            timezone: IANA timezone name (e.g., 'America/Los_Angeles').
-                     If None, returns server local time.
-
-        Returns:
-            Formatted time string with date and timezone info.
-        """
-        try:
-            if timezone:
-                tz = ZoneInfo(timezone)
-                now = datetime.now(tz)
-                tz_name = timezone
-            else:
-                # Server local time
-                now = datetime.now().astimezone()
-                tz_name = str(now.tzinfo)
-
-            # Format: "Tuesday, December 17, 2025 at 4:15:32 AM (America/Los_Angeles)"
-            formatted = now.strftime("%A, %B %d, %Y at %I:%M:%S %p")
-            result = f"{formatted} ({tz_name})"
-            logger.info(f"Time requested for {tz_name}: {result}")
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to get time for timezone '{timezone}': {e}")
-            return f"Error: Invalid timezone '{timezone}'. Use IANA format like 'America/Los_Angeles', 'Europe/London', 'Asia/Tokyo'."
-
-
 class ArtifactStore:
     """Shared artifact storage for files and URLs."""
 
@@ -2281,8 +2232,21 @@ def create_tool_executors(
     library_cache: LibraryResultsCache | None = None,
     kb_cache: KnowledgeBaseResultsCache | None = None,
     web_search_cache: WebSearchResultsCache | None = None,
+    mcp_manager: Any | None = None,
 ) -> dict[str, Any]:
-    """Create tool executors with configuration."""
+    """Create tool executors with configuration.
+
+    Args:
+        config: Application configuration dict.
+        progress_callback: Callback for progress updates.
+        agent: The agent instance.
+        arc: Arc identifier for caching.
+        router: Model router for image generation.
+        library_cache: Cache for library search results.
+        kb_cache: Cache for knowledge base results.
+        web_search_cache: Cache for web search results.
+        mcp_manager: Optional MCPClientManager for MCP server tools.
+    """
     # Tool configs
     tools = config.get("tools", {}) if config else {}
 
@@ -2374,7 +2338,6 @@ def create_tool_executors(
         ),
         "final_answer": FinalAnswerExecutor(),
         "make_plan": MakePlanExecutor(),
-        "get_time": GetTimeExecutor(),
         "share_artifact": ShareArtifactExecutor.from_config(config or {}),
         "chronicle_append": ChapterAppendExecutor(agent=agent, arc=arc),
         "chronicle_read": ChapterRenderExecutor(chronicle=agent.chronicle, arc=arc),
@@ -2450,6 +2413,13 @@ def create_tool_executors(
             max_results=lib_config.get("max_results", 10),
         )
         logger.info(f"Library search enabled: {lib_config.get('name', 'OSGeo Library')}")
+
+    # Add MCP server tools if manager is provided
+    if mcp_manager is not None:
+        mcp_executors = mcp_manager.get_tool_executors()
+        executors.update(mcp_executors)
+        if mcp_executors:
+            logger.info(f"MCP tools enabled: {len(mcp_executors)} tools from MCP servers")
 
     return executors
 

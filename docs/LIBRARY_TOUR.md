@@ -36,10 +36,10 @@ Each result shows which document and page it comes from.
 
 After a search, you can explore further:
 - `show 3` - Display the image for result #3 (figures, tables, equations)
-- `!sources` - List all sources from the last search with page numbers
-- `!source 2` - View the full page for source #2
-- `!next` / `!prev` - Navigate forward/back through a document
-- `!page 45` - Jump to a specific page
+- `sources` - List all sources from the last search with page numbers
+- `source 2` - View the full page for source #2
+- `next` / `prev` - Navigate forward/back through a document
+- `page 45` - Jump to a specific page
 
 ## Tips for Better Results
 
@@ -54,10 +54,10 @@ After a search, you can explore further:
 |---------|--------------|
 | `!l <query>` | Direct library search (no AI) |
 | `show N` | View image for result N |
-| `!sources` | List sources from last search |
-| `!source N` | View full page for source N |
-| `!next` / `!prev` | Navigate pages |
-| `!page N` | Jump to page N |
+| `sources` | List sources from last search |
+| `source N` | View full page for source N |
+| `next` / `prev` | Navigate pages |
+| `page N` | Jump to page N |
 
 ## Getting Started
 

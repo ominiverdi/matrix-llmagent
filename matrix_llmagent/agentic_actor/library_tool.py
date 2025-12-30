@@ -59,6 +59,30 @@ class LastPageView:
     timestamp: float
 
 
+@dataclass
+class LastDocumentView:
+    """Tracks the currently selected document."""
+
+    document_slug: str
+    document_title: str
+    total_pages: int
+    element_counts: dict[str, int]  # {"figure": 14, "table": 16, ...}
+    keywords: list[str]
+    summary: str
+    timestamp: float
+
+
+@dataclass
+class DocumentListPage:
+    """Tracks pagination state for document listing."""
+
+    page: int
+    total_pages: int
+    page_size: int
+    documents: list[dict]  # [{slug, title, total_pages, keywords}, ...]
+    timestamp: float
+
+
 class LibraryResultsCache:
     """Per-room cache for library search results with TTL and LRU eviction."""
 
@@ -73,6 +97,9 @@ class LibraryResultsCache:
         self.max_rooms = max_rooms
         self._cache: dict[str, CachedResults] = {}
         self._page_views: dict[str, LastPageView] = {}  # Per-arc page navigation state
+        self._document_views: dict[str, LastDocumentView] = {}  # Per-arc document selection
+        self._document_lists: dict[str, DocumentListPage] = {}  # Per-arc document list pagination
+        self._element_lists: dict[str, list[dict]] = {}  # Per-arc element listing for show N
 
     def store(self, room_id: str, results: list[dict], element_footer: str | None = None) -> None:
         """Store search results for a room."""
@@ -171,6 +198,138 @@ class LibraryResultsCache:
         if arc in self._page_views:
             del self._page_views[arc]
 
+    # --- Document View State ---
+
+    def store_document_view(
+        self,
+        arc: str,
+        document_slug: str,
+        document_title: str,
+        total_pages: int,
+        element_counts: dict[str, int],
+        keywords: list[str],
+        summary: str,
+    ) -> None:
+        """Store the currently selected document."""
+        self._document_views[arc] = LastDocumentView(
+            document_slug=document_slug,
+            document_title=document_title,
+            total_pages=total_pages,
+            element_counts=element_counts,
+            keywords=keywords,
+            summary=summary,
+            timestamp=time.time(),
+        )
+        logger.debug(f"Stored document view for {arc}: {document_slug}")
+
+    def get_document_view(self, arc: str) -> LastDocumentView | None:
+        """Get the currently selected document. Returns None if not found or expired."""
+        view = self._document_views.get(arc)
+        if view is None:
+            return None
+
+        if time.time() - view.timestamp > self.ttl_seconds:
+            del self._document_views[arc]
+            logger.debug(f"Document view expired for {arc}")
+            return None
+
+        return view
+
+    def clear_document_view(self, arc: str) -> None:
+        """Clear the document view for an arc."""
+        if arc in self._document_views:
+            del self._document_views[arc]
+
+    # --- Document List Pagination State ---
+
+    def store_document_list(
+        self,
+        arc: str,
+        page: int,
+        total_pages: int,
+        page_size: int,
+        documents: list[dict],
+    ) -> None:
+        """Store the document list pagination state."""
+        self._document_lists[arc] = DocumentListPage(
+            page=page,
+            total_pages=total_pages,
+            page_size=page_size,
+            documents=documents,
+            timestamp=time.time(),
+        )
+        logger.debug(f"Stored document list for {arc}: page {page}/{total_pages}")
+
+    def get_document_list(self, arc: str) -> DocumentListPage | None:
+        """Get the document list pagination state. Returns None if not found or expired."""
+        doc_list = self._document_lists.get(arc)
+        if doc_list is None:
+            return None
+
+        if time.time() - doc_list.timestamp > self.ttl_seconds:
+            del self._document_lists[arc]
+            logger.debug(f"Document list expired for {arc}")
+            return None
+
+        return doc_list
+
+    def clear_document_list(self, arc: str) -> None:
+        """Clear the document list for an arc."""
+        if arc in self._document_lists:
+            del self._document_lists[arc]
+
+    # --- Element List State (for show N after figures/tables/equations) ---
+
+    def store_element_list(self, arc: str, elements: list[dict]) -> None:
+        """Store element list for show N command after figures/tables/equations."""
+        self._element_lists[arc] = elements
+        logger.debug(f"Stored {len(elements)} elements for {arc}")
+
+    def get_element_list(self, arc: str) -> list[dict] | None:
+        """Get element list for show N command."""
+        return self._element_lists.get(arc)
+
+    def clear_element_list(self, arc: str) -> None:
+        """Clear the element list for an arc."""
+        if arc in self._element_lists:
+            del self._element_lists[arc]
+
+    # --- Navigation Context ---
+
+    def get_navigation_context(self, arc: str) -> str | None:
+        """Determine what next/prev should navigate based on most recent action.
+
+        Returns:
+            'documents' if last action was docs listing
+            'pages' if last action was page viewing
+            None if no navigation context
+        """
+        doc_list = self.get_document_list(arc)
+        page_view = self.get_page_view(arc)
+
+        if doc_list is None and page_view is None:
+            return None
+        if doc_list is None:
+            return "pages"
+        if page_view is None:
+            return "documents"
+
+        # Both exist - use most recent
+        if doc_list.timestamp > page_view.timestamp:
+            return "documents"
+        return "pages"
+
+    # --- Clear All ---
+
+    def clear_all(self, arc: str) -> None:
+        """Clear all cached state for an arc."""
+        self.clear(arc)  # search results
+        self.clear_page_view(arc)
+        self.clear_document_view(arc)
+        self.clear_document_list(arc)
+        self.clear_element_list(arc)
+        logger.debug(f"Cleared all library cache for {arc}")
+
 
 # --- Citation Tags ---
 
@@ -224,7 +383,7 @@ def format_sources_list(results: list[dict]) -> str:
             lines.append(f'  [{i}] {doc_title} p.{page} - "{snippet}"')
 
     lines.append("")
-    lines.append("View source page: !source N")
+    lines.append("View source page: source N")
 
     return "\n".join(lines)
 
@@ -317,7 +476,6 @@ def format_results(results: list[dict], library_name: str, *, compact: bool = Fa
 
     has_elements = False
     for i, result in enumerate(results, 1):
-        tag = get_citation_tag(result)
         page = result.get("page_number", "?")
         doc_title = result.get("document_title", "Unknown")
         # Shorten doc title if too long
@@ -346,6 +504,189 @@ def format_results(results: list[dict], library_name: str, *, compact: bool = Fa
         )
 
     return "\n".join(lines)
+
+
+# --- Document/Element Formatting for Heuristic Commands ---
+
+
+def format_document_list(
+    documents: list[dict],
+    page: int,
+    total_pages: int,
+) -> str:
+    """Format document list for 'docs' command.
+
+    Args:
+        documents: List of document dicts from API.
+        page: Current page number.
+        total_pages: Total number of pages.
+
+    Returns:
+        Formatted string for display.
+    """
+    if not documents:
+        return "No documents found in library."
+
+    lines = [f"Documents in library: (page {page}/{total_pages})", "=" * 50]
+
+    for i, doc in enumerate(documents, 1):
+        slug = doc.get("slug", "unknown")
+        title = doc.get("title", "Untitled")
+        pages = doc.get("total_pages", 0)
+        keywords = doc.get("keywords", [])
+
+        lines.append(f"[{i}] {slug} - {pages} pages")
+        lines.append(f"    {title}")
+        if keywords:
+            kw_str = ", ".join(keywords[:5])
+            if len(keywords) > 5:
+                kw_str += ", ..."
+            lines.append(f"    {kw_str}")
+
+    lines.append("")
+    lines.append("'doc N' or 'doc <slug>' for details | 'n'=next, 'p'=prev")
+
+    return "\n".join(lines)
+
+
+def format_document_info(doc: dict) -> str:
+    """Format document details for 'doc <slug>' command.
+
+    Args:
+        doc: Document dict from API with full metadata.
+
+    Returns:
+        Formatted string for display.
+    """
+    title = doc.get("title", "Untitled")
+    slug = doc.get("slug", "unknown")
+    pages = doc.get("total_pages", 0)
+    source = doc.get("source_file", "")
+    summary = doc.get("summary", "")
+    keywords = doc.get("keywords", [])
+    element_counts = doc.get("element_counts", {})
+
+    lines = [title, "=" * 50]
+    lines.append(f"Slug:    {slug}")
+    lines.append(f"Pages:   {pages}")
+    if source:
+        lines.append(f"Source:  {source}")
+
+    # Element counts
+    if element_counts:
+        lines.append("")
+        lines.append("Elements:")
+        for elem_type, count in sorted(element_counts.items()):
+            if count > 0:
+                # Pluralize correctly (figure->figures, equation->equations)
+                plural = elem_type + "s" if not elem_type.endswith("s") else elem_type
+                lines.append(f"  {plural}: {count}")
+
+    # Keywords
+    if keywords:
+        lines.append("")
+        lines.append("Keywords:")
+        lines.append(f"  {', '.join(keywords)}")
+
+    # Summary
+    if summary:
+        lines.append("")
+        lines.append("Summary:")
+        # Wrap summary to reasonable width
+        lines.append(f"  {summary}")
+
+    lines.append("")
+    lines.append("Use 'page N' to view pages, 'figures'/'tables'/'equations' to browse elements")
+
+    return "\n".join(lines)
+
+
+def format_element_list(
+    elements: list[dict],
+    element_type: str,
+    doc_title: str,
+    page_filter: int | None = None,
+    total: int | None = None,
+) -> str:
+    """Format element list for 'figures'/'tables'/'equations' commands.
+
+    Args:
+        elements: List of element dicts from API.
+        element_type: Type being listed (figure, table, equation).
+        doc_title: Document title for header.
+        page_filter: If set, indicates elements are filtered to this page.
+        total: Total count of elements (may be more than returned).
+
+    Returns:
+        Formatted string for display.
+    """
+    type_plural = element_type + "s"
+    if element_type == "equation":
+        type_plural = "equations"
+
+    if not elements:
+        if page_filter:
+            return f"No {type_plural} on page {page_filter} of {doc_title}."
+        return f"No {type_plural} in {doc_title}."
+
+    # Build header
+    if page_filter:
+        header = f"{type_plural.title()} on page {page_filter} of {doc_title}:"
+    else:
+        count_str = f"{total}" if total else f"{len(elements)}"
+        header = f"All {type_plural} in {doc_title} ({count_str} total):"
+
+    lines = [header, ""]
+
+    for i, elem in enumerate(elements, 1):
+        label = elem.get("label", f"{element_type} {i}")
+        page = elem.get("page_number", "?")
+        desc = elem.get("description", "").replace("\n", " ").strip()
+
+        # Truncate description
+        if len(desc) > 80:
+            desc = desc[:77] + "..."
+
+        lines.append(f"[{i}] {label} - p.{page}")
+        if desc:
+            lines.append(f"    {desc}")
+
+    lines.append("")
+    if page_filter:
+        lines.append(f"'show N' to view | '{element_type}s all' for all {type_plural}")
+    else:
+        lines.append("'show N' to view")
+
+    return "\n".join(lines)
+
+
+def get_library_context_summary(
+    document_view: "LastDocumentView | None",
+    page_view: "LastPageView | None",
+) -> str | None:
+    """Generate minimal library context for LLM system prompt.
+
+    Args:
+        document_view: Currently selected document state.
+        page_view: Currently viewed page state.
+
+    Returns:
+        Context string to append to system prompt, or None if no context.
+    """
+    parts = []
+
+    if document_view:
+        parts.append(
+            f"Current document: {document_view.document_title} "
+            f"({document_view.document_slug}, {document_view.total_pages} pages)"
+        )
+
+    if page_view:
+        parts.append(f"Current page: {page_view.page}/{page_view.total_pages}")
+
+    if parts:
+        return "Library browsing context:\n" + "\n".join(f"- {p}" for p in parts)
+    return None
 
 
 # --- Executor ---
@@ -539,7 +880,7 @@ class LibrarySearchExecutor:
             {
                 "type": "text",
                 "text": f"Page {result.page_number} of {result.total_pages} from '{result.document_title}'. "
-                f"User can say 'next page' or 'prev page' to navigate, or use !next/!prev shortcuts.",
+                f"User can say 'next page' or 'prev page' to navigate, or use next/prev shortcuts.",
             },
             {
                 "type": "image",
@@ -721,6 +1062,154 @@ async def search_documents(
     except Exception as e:
         logger.error(f"Document search error: {e}")
         return f"Document search error: {e}"
+
+
+async def list_documents(
+    base_url: str,
+    page: int = 1,
+    page_size: int = 5,
+    timeout: int = 30,
+) -> dict | str:
+    """List all documents in the library with pagination.
+
+    Args:
+        base_url: Base URL of the osgeo-library server.
+        page: Page number (1-indexed).
+        page_size: Number of documents per page.
+        timeout: HTTP request timeout in seconds.
+
+    Returns:
+        Dict with documents, page, total_pages, total_documents.
+        Returns error string if request failed.
+    """
+    try:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                f"{base_url.rstrip('/')}/documents",
+                params={"page": page, "page_size": page_size},
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as response,
+        ):
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error(f"List documents failed: {response.status} - {error_text}")
+                return f"Failed to list documents (HTTP {response.status})."
+
+            return await response.json()
+
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"Cannot connect to library server: {e}")
+        return "Cannot connect to library server."
+    except TimeoutError:
+        logger.error(f"List documents timed out after {timeout}s")
+        return "Request timed out."
+    except Exception as e:
+        logger.error(f"List documents error: {e}")
+        return f"Error: {e}"
+
+
+async def get_document_info(
+    base_url: str,
+    document_slug: str,
+    timeout: int = 30,
+) -> dict | str:
+    """Get detailed information about a document.
+
+    Args:
+        base_url: Base URL of the osgeo-library server.
+        document_slug: Document identifier.
+        timeout: HTTP request timeout in seconds.
+
+    Returns:
+        Dict with document metadata (slug, title, pages, elements, summary, keywords).
+        Returns error string if request failed.
+    """
+    try:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                f"{base_url.rstrip('/')}/documents/{document_slug}",
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as response,
+        ):
+            if response.status == 404:
+                return f"Document '{document_slug}' not found."
+
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error(f"Get document info failed: {response.status} - {error_text}")
+                return f"Failed to get document info (HTTP {response.status})."
+
+            return await response.json()
+
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"Cannot connect to library server: {e}")
+        return "Cannot connect to library server."
+    except TimeoutError:
+        logger.error(f"Get document info timed out after {timeout}s")
+        return "Request timed out."
+    except Exception as e:
+        logger.error(f"Get document info error: {e}")
+        return f"Error: {e}"
+
+
+async def list_elements(
+    base_url: str,
+    document_slug: str,
+    element_type: str | None = None,
+    page: int | None = None,
+    limit: int = 50,
+    timeout: int = 30,
+) -> dict | str:
+    """List elements (figures, tables, equations) from a document.
+
+    Args:
+        base_url: Base URL of the osgeo-library server.
+        document_slug: Document identifier.
+        element_type: Filter by type: figure, table, equation, chart, diagram.
+        page: Filter to elements on a specific page (1-indexed).
+        limit: Maximum number of results.
+        timeout: HTTP request timeout in seconds.
+
+    Returns:
+        Dict with elements list and total count.
+        Returns error string if request failed.
+    """
+    params: dict[str, str | int] = {"limit": limit}
+    if element_type:
+        params["element_type"] = element_type
+    if page is not None:
+        params["page"] = page
+
+    try:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                f"{base_url.rstrip('/')}/documents/{document_slug}/elements",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as response,
+        ):
+            if response.status == 404:
+                return f"Document '{document_slug}' not found."
+
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error(f"List elements failed: {response.status} - {error_text}")
+                return f"Failed to list elements (HTTP {response.status})."
+
+            return await response.json()
+
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"Cannot connect to library server: {e}")
+        return "Cannot connect to library server."
+    except TimeoutError:
+        logger.error(f"List elements timed out after {timeout}s")
+        return "Request timed out."
+    except Exception as e:
+        logger.error(f"List elements error: {e}")
+        return f"Error: {e}"
 
 
 # --- Page Fetching ---

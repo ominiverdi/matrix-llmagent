@@ -96,6 +96,7 @@ class AgenticLLMActor:
         library_cache = getattr(self.agent, "library_cache", None)
         kb_cache = getattr(self.agent, "kb_cache", None)
         web_search_cache = getattr(self.agent, "web_search_cache", None)
+        mcp_manager = getattr(self.agent, "mcp_manager", None)
         base_executors = create_tool_executors(
             self.config,
             progress_callback=progress_callback,
@@ -105,6 +106,7 @@ class AgenticLLMActor:
             library_cache=library_cache,
             kb_cache=kb_cache,
             web_search_cache=web_search_cache,
+            mcp_manager=mcp_manager,
         )
         tool_executors = {**base_executors, **self.additional_tool_executors}
 
@@ -180,8 +182,13 @@ class AgenticLLMActor:
                 # Only include tools that have executors configured
                 import re
 
+                # Get MCP tools if manager is available
+                mcp_tools = []
+                if mcp_manager is not None:
+                    mcp_tools = mcp_manager.get_all_tools()
+
                 available_tools = []
-                for tool in TOOLS + self.additional_tools:
+                for tool in TOOLS + self.additional_tools + mcp_tools:
                     # Skip tools that don't have executors
                     if tool["name"] not in tool_executors:
                         continue

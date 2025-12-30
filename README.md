@@ -443,7 +443,7 @@ Search and browse scientific documents (PDFs) with semantic search over text, fi
 - Semantic search over document content
 - Visual element search (figures, tables, equations)
 - Full page image viewing with `page_number` parameter
-- Page navigation shortcuts: `!next`, `!prev`, `!page N`
+- Page navigation shortcuts: `next`, `prev`, `page N`
 - Document fuzzy search by title/author
 
 **Configuration:**
@@ -472,9 +472,9 @@ Search and browse scientific documents (PDFs) with semantic search over text, fi
 User: show me page 29 of Snyder
 Bot: [Fetches page 29 from "Map Projections: A Working Manual"]
      [Displays page image]
-     Page 29 of 397 from 'Map Projections'. Say 'next page' or use !next to navigate.
+     Page 29 of 397 from 'Map Projections'. Say 'next page' or 'next' to navigate.
 
-User: !next
+User: next
 Bot: [Fetches page 30]
      [Displays page image]
 
@@ -485,7 +485,7 @@ Bot: [Searches library, returns figures and equations]
 
 ### Other Agent Tools
 
-- **`get_time`** - Get current time in any timezone (e.g., "America/Los_Angeles", "Europe/London")
+- **`get_time`** - Get current time in any timezone (e.g., "America/Los_Angeles", "Europe/London") - via MCP server
 - **`progress_report`** - Send real-time progress updates during long operations
 - **`make_plan`** - Formulate research/execution strategy before acting
 - **`final_answer`** - Structured final response with thinking process

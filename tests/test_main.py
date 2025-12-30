@@ -417,7 +417,7 @@ class TestSourcesCommand:
         assert "Sources from last search (Knowledge Base)" in result
         assert "GeoServer" in result
         assert "OSGeo Foundation" in result
-        assert "!source N" in result
+        assert "source N" in result
 
     @pytest.mark.asyncio
     async def test_source_detail_page(self, temp_config_file):
