@@ -144,17 +144,15 @@ async def test_progress_report_tool_emits_callback(monkeypatch, mock_agent):
             return {"content": [{"type": "text", "text": "Final answer"}]}, fake_client, None
 
     from unittest.mock import AsyncMock as _AsyncMock
-    from unittest.mock import patch as _patch
 
-    with _patch(
-        "matrix_llmagent.providers.ModelRouter.call_raw_with_model",
-        new=_AsyncMock(side_effect=fake_call_raw_with_model),
-    ):
-        # Context can be emptyish; agent ensures a user msg
-        context = [{"role": "user", "content": "Hello"}]
+    # Patch the instance's model_router method directly (not the class method)
+    agent.model_router.call_raw_with_model = _AsyncMock(side_effect=fake_call_raw_with_model)
 
-        # Run agent without using context manager (fake client doesn't need it here)
-        result = await agent.run_agent(context, progress_callback=progress_cb, arc="test-arc")
+    # Context can be emptyish; agent ensures a user msg
+    context = [{"role": "user", "content": "Hello"}]
+
+    # Run agent without using context manager (fake client doesn't need it here)
+    result = await agent.run_agent(context, progress_callback=progress_cb, arc="test-arc")
 
     assert result == "Final answer"
     assert sent, "Expected progress callback to be called at least once"

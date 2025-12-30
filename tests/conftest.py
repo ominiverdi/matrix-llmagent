@@ -16,6 +16,9 @@ def mock_agent():
     """Create a mock agent with chronicle attribute."""
     agent = MagicMock()
     agent.chronicle = MagicMock()
+    # Explicitly set mcp_manager to None to avoid MagicMock auto-creation
+    # which would break list concatenation in AgenticLLMActor.run_agent
+    agent.mcp_manager = None
     return agent
 
 
