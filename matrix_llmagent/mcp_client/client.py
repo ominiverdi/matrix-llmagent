@@ -23,6 +23,7 @@ class MCPServerConfig:
     cwd: str | None = None  # Working directory for stdio transport
     url: str | None = None  # For HTTP transport
     env: dict[str, str] = field(default_factory=dict)  # Environment variables for stdio
+    headers: dict[str, str] = field(default_factory=dict)  # HTTP headers for HTTP transport
 
 
 @dataclass
@@ -96,6 +97,7 @@ class MCPClientManager:
                 cwd=server_cfg.get("cwd"),
                 url=server_cfg.get("url"),
                 env=server_cfg.get("env", {}),
+                headers=server_cfg.get("headers", {}),
             )
 
     @property
@@ -192,8 +194,14 @@ class MCPClientManager:
             if not cfg.url:
                 raise ValueError(f"MCP server '{name}': HTTP transport requires 'url'")
 
-            # Create the HTTP client context
-            http_ctx = streamable_http_client(cfg.url)
+            # Create the HTTP client context, with optional headers
+            import httpx
+
+            http_client = None
+            if cfg.headers:
+                http_client = httpx.AsyncClient(headers=cfg.headers)
+
+            http_ctx = streamable_http_client(cfg.url, http_client=http_client)
             read, write, _ = await http_ctx.__aenter__()
 
             # Create session
