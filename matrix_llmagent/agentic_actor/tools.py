@@ -2313,8 +2313,11 @@ def create_tool_executors(
 
     # Webpage visitor config
     webpage_visitor_type = tools_config.get("webpage_visitor", "local")
+    webpage_visitor = None
 
-    if webpage_visitor_type == "local":
+    if webpage_visitor_type == "none":
+        logger.info("Local webpage visitor disabled (use MCP tools instead)")
+    elif webpage_visitor_type == "local":
         webpage_visitor = LocalWebpageVisitor(
             progress_callback=progress_callback, user_agent=user_agent
         )
@@ -2332,7 +2335,6 @@ def create_tool_executors(
     min_interval = int(progress_cfg.get("min_interval_seconds", 15))
 
     executors = {
-        "visit_webpage": webpage_visitor,
         "progress_report": ProgressReportExecutor(
             send_callback=progress_callback, min_interval_seconds=min_interval
         ),
@@ -2342,6 +2344,10 @@ def create_tool_executors(
         "chronicle_append": ChapterAppendExecutor(agent=agent, arc=arc),
         "chronicle_read": ChapterRenderExecutor(chronicle=agent.chronicle, arc=arc),
     }
+
+    # Add visit_webpage only if configured (not "none")
+    if webpage_visitor:
+        executors["visit_webpage"] = webpage_visitor
 
     # Add web_search only if a search provider is configured
     if search_executor:
