@@ -231,12 +231,15 @@ class MCPClientManager:
         tools = []
         for server_name, server_tools in self._tools.items():
             for mcp_tool in server_tools:
-                # Create unique tool name: mcp:<server>:<tool>
-                full_name = f"mcp:{server_name}:{mcp_tool.name}"
+                # Create unique tool name: mcp_<server>_<tool>
+                # Using underscores instead of colons for provider compatibility
+                safe_server = server_name.replace("-", "_").replace(":", "_")
+                safe_tool = mcp_tool.name.replace("-", "_").replace(":", "_")
+                full_name = f"mcp_{safe_server}_{safe_tool}"
                 tools.append(
                     {
                         "name": full_name,
-                        "description": f"[MCP:{server_name}] {mcp_tool.description}",
+                        "description": f"[MCP/{server_name}] {mcp_tool.description}",
                         "input_schema": mcp_tool.input_schema
                         or {"type": "object", "properties": {}},
                         "persist": "summary",
@@ -256,7 +259,10 @@ class MCPClientManager:
         executors = {}
         for server_name, server_tools in self._tools.items():
             for mcp_tool in server_tools:
-                full_name = f"mcp:{server_name}:{mcp_tool.name}"
+                # Must match naming in get_all_tools()
+                safe_server = server_name.replace("-", "_").replace(":", "_")
+                safe_tool = mcp_tool.name.replace("-", "_").replace(":", "_")
+                full_name = f"mcp_{safe_server}_{safe_tool}"
                 executors[full_name] = MCPToolExecutor(
                     manager=self,
                     server_name=server_name,

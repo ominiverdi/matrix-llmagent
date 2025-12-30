@@ -149,9 +149,9 @@ class TestMCPClientManager:
 
         tools = manager.get_all_tools()
         assert len(tools) == 2
-        assert tools[0]["name"] == "mcp:server1:tool_a"
-        assert tools[1]["name"] == "mcp:server1:tool_b"
-        assert "[MCP:server1]" in tools[0]["description"]
+        assert tools[0]["name"] == "mcp_server1_tool_a"
+        assert tools[1]["name"] == "mcp_server1_tool_b"
+        assert "[MCP/server1]" in tools[0]["description"]
 
     def test_get_tool_executors(self):
         """Test getting executor instances for tools."""
@@ -169,8 +169,8 @@ class TestMCPClientManager:
 
         executors = manager.get_tool_executors()
         assert len(executors) == 1
-        assert "mcp:server1:search" in executors
-        assert isinstance(executors["mcp:server1:search"], MCPToolExecutor)
+        assert "mcp_server1_search" in executors
+        assert isinstance(executors["mcp_server1_search"], MCPToolExecutor)
 
     @pytest.mark.asyncio
     async def test_connect_all_no_servers(self):
