@@ -24,6 +24,7 @@ class MCPServerConfig:
     url: str | None = None  # For HTTP transport
     env: dict[str, str] = field(default_factory=dict)  # Environment variables for stdio
     headers: dict[str, str] = field(default_factory=dict)  # HTTP headers for HTTP transport
+    enabled_tools: list[str] | None = None  # None = all tools, list = whitelist only these
 
 
 @dataclass
@@ -99,6 +100,7 @@ class MCPClientManager:
                 url=server_cfg.get("url"),
                 env=server_cfg.get("env", {}),
                 headers=server_cfg.get("headers", {}),
+                enabled_tools=server_cfg.get("enabled_tools"),
             )
 
     @property
@@ -133,9 +135,16 @@ class MCPClientManager:
 
         self._connected = True
         total_tools = sum(len(tools) for tools in self._tools.values())
-        logger.info(
-            f"MCP client connected to {len(self._sessions)} servers, {total_tools} tools available"
-        )
+        enabled_tools = sum(self._count_enabled_tools(name) for name in self._tools)
+        if enabled_tools < total_tools:
+            logger.info(
+                f"MCP client connected to {len(self._sessions)} servers, "
+                f"{enabled_tools}/{total_tools} tools enabled"
+            )
+        else:
+            logger.info(
+                f"MCP client connected to {len(self._sessions)} servers, {total_tools} tools available"
+            )
 
     async def _connect_server(self, name: str, cfg: MCPServerConfig) -> None:
         """Connect to a single MCP server and discover its tools."""
@@ -189,7 +198,16 @@ class MCPClientManager:
                 for tool in tools_response.tools
             ]
 
-            logger.info(f"Connected to MCP server '{name}' (stdio): {len(self._tools[name])} tools")
+            total = len(self._tools[name])
+            enabled = self._count_enabled_tools(name)
+            if cfg.enabled_tools is not None:
+                tool_names = [t.name for t in self._tools[name]]
+                logger.debug(f"MCP server '{name}' discovered tools: {tool_names}")
+                logger.info(
+                    f"Connected to MCP server '{name}' (stdio): {enabled}/{total} tools enabled"
+                )
+            else:
+                logger.info(f"Connected to MCP server '{name}' (stdio): {total} tools")
 
         elif cfg.transport in ("streamable-http", "http"):
             if not cfg.url:
@@ -226,20 +244,43 @@ class MCPClientManager:
                 for tool in tools_response.tools
             ]
 
-            logger.info(f"Connected to MCP server '{name}' (HTTP): {len(self._tools[name])} tools")
+            total = len(self._tools[name])
+            enabled = self._count_enabled_tools(name)
+            if cfg.enabled_tools is not None:
+                logger.info(
+                    f"Connected to MCP server '{name}' (HTTP): {enabled}/{total} tools enabled"
+                )
+            else:
+                logger.info(f"Connected to MCP server '{name}' (HTTP): {total} tools")
 
         else:
             raise ValueError(f"MCP server '{name}': unknown transport '{cfg.transport}'")
+
+    def _is_tool_enabled(self, server_name: str, tool_name: str) -> bool:
+        """Check if a tool is enabled based on server whitelist config."""
+        cfg = self._server_configs.get(server_name)
+        if not cfg or cfg.enabled_tools is None:
+            return True  # No whitelist = all tools enabled
+        return tool_name in cfg.enabled_tools
+
+    def _count_enabled_tools(self, server_name: str) -> int:
+        """Count how many tools are enabled for a server after whitelist filtering."""
+        server_tools = self._tools.get(server_name, [])
+        return sum(1 for t in server_tools if self._is_tool_enabled(server_name, t.name))
 
     def get_all_tools(self) -> list[dict]:
         """Get all tools from all connected servers in our Tool format.
 
         Returns tool definitions compatible with the TOOLS list format,
         with names prefixed by server name to avoid collisions.
+        Tools are filtered by enabled_tools whitelist if configured.
         """
         tools = []
         for server_name, server_tools in self._tools.items():
             for mcp_tool in server_tools:
+                # Skip tools not in whitelist (if whitelist is configured)
+                if not self._is_tool_enabled(server_name, mcp_tool.name):
+                    continue
                 # Create unique tool name: mcp_<server>_<tool>
                 # Using underscores instead of colons for provider compatibility
                 safe_server = server_name.replace("-", "_").replace(":", "_")
@@ -264,10 +305,14 @@ class MCPClientManager:
 
         Returns a dict mapping tool names to MCPToolExecutor instances,
         ready to be merged into the agent's tool_executors dict.
+        Tools are filtered by enabled_tools whitelist if configured.
         """
         executors = {}
         for server_name, server_tools in self._tools.items():
             for mcp_tool in server_tools:
+                # Skip tools not in whitelist (if whitelist is configured)
+                if not self._is_tool_enabled(server_name, mcp_tool.name):
+                    continue
                 # Must match naming in get_all_tools()
                 safe_server = server_name.replace("-", "_").replace(":", "_")
                 safe_tool = mcp_tool.name.replace("-", "_").replace(":", "_")

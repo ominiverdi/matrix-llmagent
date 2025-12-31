@@ -172,6 +172,83 @@ class TestMCPClientManager:
         assert "mcp_server1_search" in executors
         assert isinstance(executors["mcp_server1_search"], MCPToolExecutor)
 
+    def test_enabled_tools_whitelist(self):
+        """Test that enabled_tools whitelist filters tools correctly."""
+        config = {
+            "tools": {
+                "mcp": {
+                    "servers": {
+                        "weather": {
+                            "command": ["npx", "weather-server"],
+                            "transport": "stdio",
+                            "enabled_tools": ["get_forecast", "get_current"],
+                        }
+                    }
+                }
+            }
+        }
+        manager = MCPClientManager(config)
+
+        # Simulate discovered tools (more than whitelisted)
+        manager._tools["weather"] = [
+            MCPTool(
+                server_name="weather", name="get_forecast", description="Forecast", input_schema={}
+            ),
+            MCPTool(
+                server_name="weather", name="get_current", description="Current", input_schema={}
+            ),
+            MCPTool(
+                server_name="weather", name="get_history", description="History", input_schema={}
+            ),
+            MCPTool(
+                server_name="weather", name="get_alerts", description="Alerts", input_schema={}
+            ),
+        ]
+
+        # Should only return whitelisted tools
+        tools = manager.get_all_tools()
+        assert len(tools) == 2
+        tool_names = [t["name"] for t in tools]
+        assert "mcp_weather_get_forecast" in tool_names
+        assert "mcp_weather_get_current" in tool_names
+        assert "mcp_weather_get_history" not in tool_names
+        assert "mcp_weather_get_alerts" not in tool_names
+
+        # Executors should also be filtered
+        executors = manager.get_tool_executors()
+        assert len(executors) == 2
+        assert "mcp_weather_get_forecast" in executors
+        assert "mcp_weather_get_current" in executors
+
+    def test_enabled_tools_none_means_all(self):
+        """Test that no enabled_tools config means all tools are available."""
+        config = {
+            "tools": {
+                "mcp": {
+                    "servers": {
+                        "weather": {
+                            "command": ["npx", "weather-server"],
+                            "transport": "stdio",
+                            # No enabled_tools = all tools enabled
+                        }
+                    }
+                }
+            }
+        }
+        manager = MCPClientManager(config)
+
+        manager._tools["weather"] = [
+            MCPTool(
+                server_name="weather", name="get_forecast", description="Forecast", input_schema={}
+            ),
+            MCPTool(
+                server_name="weather", name="get_current", description="Current", input_schema={}
+            ),
+        ]
+
+        tools = manager.get_all_tools()
+        assert len(tools) == 2  # All tools available
+
     @pytest.mark.asyncio
     async def test_connect_all_no_servers(self):
         """Test connect_all with no servers configured."""
